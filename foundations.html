@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sleep Stage — พื้นฐานและคณิตศาสตร์ของ STFT + CNN + BiGRU | Quant OS</title><meta name="description" content="บทเรียนภาษาไทย 24 หัวข้อ ตั้งแต่สัญญาณ EEG ไปจนถึง STFT, CNN, BiGRU และการอ่านผลวิจัย พร้อมสูตรคณิตศาสตร์"><link rel="stylesheet" href="course.css"><link rel="stylesheet" href="foundations.css"></head>
+<body><a class="skip-link" href="#reading">ข้ามไปเนื้อหา</a><header class="topbar"><a class="brand" href="#top"><span>SLEEP STAGE <small>FOUNDATIONS & MATHEMATICS</small></span></a><nav class="top-actions" aria-label="กลับไป Quant OS"><a href="index.html">คลัง Sleep Stage</a><a href="/#sleepstage" target="_top">Quant OS</a></nav></header>
+<main id="reading" tabindex="-1"><section id="top" class="introduction"><p class="eyebrow">QUANT OS / READING LIBRARY</p><h1>เข้าใจงาน Sleep Stage<br>จากพื้นฐานถึงสมการ</h1><p class="intro-text">บทเรียนฉบับเต็มจากแชท 24 หัวข้อ เริ่มจากสัญญาณสมอง แล้วค่อยต่อยอดสู่ STFT, CNN + BiGRU, การเรียนรู้ และความไม่แน่นอนของผลวิจัย</p><div class="snapshot-note"><strong>บทเรียนเพื่ออ่านย้อนหลัง ไม่ใช่การทดลองใหม่</strong><p>เนื้อหานี้อธิบายโมเดลแบบย่อ STFT + CNN + BiGRU ไม่ใช่การทำซ้ำโมเดล SST / contrastive ของ paper ต้นฉบับ ผล R1 เป็น post-hoc และใช้ normalization แบบ transductive ตามข้อจำกัดในบทเรียน</p><p lang="en">Subject-wise protocol differs from the paper; test &lt; 10 subjects.</p></div><p class="source-meta">ต้นฉบับ: 14 ต.ค. 2026 เวลา 09:34 น. (Asia/Bangkok) · เก็บข้อความต้นฉบับโดยไม่แก้ผลวิจัย</p></section>
+<nav id="contents" aria-label="สารบัญ 24 หัวข้อ"><details open><summary>สารบัญ — เลือกอ่านทีละหัวข้อ</summary><ol class="lesson-toc"><li><a href="#lesson-01">01 · สัญญาณ EEG คืออะไรในทางคณิตศาสตร์?</a></li>
+<li><a href="#lesson-02">02 · คอมพิวเตอร์เปลี่ยนสัญญาณต่อเนื่องให้เป็นตัวเลขอย่างไร?</a></li>
+<li><a href="#lesson-03">03 · “หนึ่งตัวอย่างข้อมูล” ของงานเราคืออะไร?</a></li>
+<li><a href="#lesson-04">04 · ความถี่ แอมพลิจูด และเฟสต่างกันอย่างไร?</a></li>
+<li><a href="#lesson-05">05 · Fourier Transform ทำอะไร?</a></li>
+<li><a href="#lesson-06">06 · STFT เพิ่มมิติของเวลาอย่างไร?</a></li>
+<li><a href="#lesson-07">07 · ทำไมจึงใช้ logarithm?</a></li>
+<li><a href="#lesson-08">08 · ค่าเฉลี่ย ความแปรปรวน และ normalization</a></li>
+<li><a href="#lesson-09">09 · ฐานกับ R1 ต่างกันตรงไหนในสูตร?</a></li>
+<li><a href="#lesson-10">10 · ทำไม normalization รายคืนอาจช่วยได้? ดูจากสมการ</a></li>
+<li><a href="#lesson-11">11 · Tensor ที่โมเดลเราได้รับมีหน้าตาอย่างไร?</a></li>
+<li><a href="#lesson-12">12 · CNN คำนวณอะไรจริง ๆ?</a></li>
+<li><a href="#lesson-13">13 · BatchNorm กับ normalization ก่อนเข้าโมเดลไม่เหมือนกัน</a></li>
+<li><a href="#lesson-14">14 · GRU อ่านลำดับด้วยสมการอย่างไร?</a></li>
+<li><a href="#lesson-15">15 · หัวจำแนกเปลี่ยน hidden state เป็นคำทายอย่างไร?</a></li>
+<li><a href="#lesson-16">16 · Loss บอกโมเดลว่าผิดอย่างไร?</a></li>
+<li><a href="#lesson-17">17 · Gradient ทำให้น้ำหนักเรียนรู้ได้อย่างไร?</a></li>
+<li><a href="#lesson-18">18 · AdamW, learning rate และ gradient clipping</a></li>
+<li><a href="#lesson-19">19 · ทำไม loss ต่ำยังไม่พอ?</a></li>
+<li><a href="#lesson-20">20 · การเลื่อนหน้าต่างและเฉลี่ย logits</a></li>
+<li><a href="#lesson-21">21 · สูตรประเมินผลแต่ละตัววัดอะไร?</a></li>
+<li><a href="#lesson-22">22 · Bootstrap และช่วงความเชื่อมั่น</a></li>
+<li><a href="#lesson-23">23 · เชื่อมทั้งหมดกลับมาที่การทดลองของเรา</a></li>
+<li><a href="#lesson-24">24 · ข้อสรุปทางหลักการที่ควรจำ</a></li></ol></details></nav>
+<section id="lesson-01" class="chapter markdown-cell"><h2>1. สัญญาณ EEG คืออะไรในทางคณิตศาสตร์?</h2>
+<p>เริ่มจากคำว่า <strong>สัญญาณ — signal</strong></p>
+<p>สัญญาณคือปริมาณบางอย่างที่เปลี่ยนไปตามเวลา เช่น อุณหภูมิ เสียง หรือแรงดันไฟฟ้า</p>
+<p>ถ้าปริมาณนั้นเปลี่ยนอย่างต่อเนื่อง เราเขียนเป็นฟังก์ชัน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x(t)</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span> คือเวลา</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x(t)</annotation></semantics></math></span> คือค่าของสัญญาณ ณ เวลานั้น</li>
+</ul>
+<p>สำหรับ EEG ปริมาณที่เราบันทึกเป็นความต่างศักย์ไฟฟ้าที่วัดผ่านอิเล็กโทรด ไม่ใช่การอ่านความคิดหรือการวัดเซลล์ประสาททีละตัวโดยตรง</p>
+<p>ช่อง <strong>Fpz-Cz</strong> ที่เราใช้เป็นการวัดความต่างระหว่างตำแหน่งอิเล็กโทรดสองตำแหน่ง เขียนในแนวคิดได้ว่า:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi>V</mi><mrow><mi mathvariant="normal">F</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">z</mi></mrow></msub><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>−</mo><msub><mi>V</mi><mrow><mi mathvariant="normal">C</mi><mi mathvariant="normal">z</mi></mrow></msub><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x(t)=V_{\mathrm{Fpz}}(t)-V_{\mathrm{Cz}}(t)</annotation></semantics></math></span></div>
+<p>ค่าที่เราใช้ประมวลผลอยู่ในหน่วยไมโครโวลต์:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mn>1</mn><mtext> </mtext><mi>μ</mi><mi>V</mi><mo>=</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>6</mn></mrow></msup><mtext> </mtext><mi>V</mi></mrow><annotation encoding="application/x-tex">1\,\mu V=10^{-6}\,V</annotation></semantics></math></span></div>
+<p>หนึ่งจุดบนกราฟ EEG จึงมีความหมายว่า:</p>
+<blockquote>
+<p>ณ เวลานี้ ช่องอิเล็กโทรดนี้วัดความต่างศักย์ได้เท่าไร</p>
+</blockquote>
+<p>กราฟที่ขึ้นลงไม่ได้บอกระยะการนอนแบบตรง ๆ เราต้องวิเคราะห์รูปแบบของมัน และรูปแบบนั้นอาจได้รับอิทธิพลทั้งจากกิจกรรมทางสรีรวิทยาและสิ่งรบกวนในการบันทึก</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-02" class="chapter markdown-cell"><h2>2. คอมพิวเตอร์เปลี่ยนสัญญาณต่อเนื่องให้เป็นตัวเลขอย่างไร?</h2>
+<p>คอมพิวเตอร์ไม่ได้เก็บ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x(t)</annotation></semantics></math></span> ทุกขณะอย่างต่อเนื่อง แต่เก็บค่าที่เวลาห่างกันเป็นช่วง ๆ เรียกว่า <strong>sampling — การสุ่มตัวอย่างสัญญาณ</strong></p>
+<p>ถ้า sampling rate คือ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>s</mi></msub></mrow><annotation encoding="application/x-tex">f_s</annotation></semantics></math></span> เราจะเก็บค่าทุก:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mfrac><mn>1</mn><msub><mi>f</mi><mi>s</mi></msub></mfrac></mrow><annotation encoding="application/x-tex">\Delta t=\frac{1}{f_s}</annotation></semantics></math></span></div>
+<p>วินาที</p>
+<p>โครงการเราใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>f</mi><mi>s</mi></msub><mo>=</mo><mn>100</mn><mtext> Hz</mtext></mrow><annotation encoding="application/x-tex">f_s=100\text{ Hz}</annotation></semantics></math></span></div>
+<p>จึงได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mfrac><mn>1</mn><mn>100</mn></mfrac><mo>=</mo><mn>0.01</mn><mtext> วินาที</mtext></mrow><annotation encoding="application/x-tex">\Delta t=\frac{1}{100}=0.01\text{ วินาที}</annotation></semantics></math></span></div>
+<p>นั่นคือเก็บ 100 ค่าต่อวินาที</p>
+<p>สัญญาณที่คอมพิวเตอร์เห็นเขียนเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo>=</mo><mi>x</mi><mrow><mo fence="true">(</mo><mfrac><mi>n</mi><msub><mi>f</mi><mi>s</mi></msub></mfrac><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">x[n]=x\left(\frac{n}{f_s}\right)</annotation></semantics></math></span></div>
+<p>โดย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span> เป็นดัชนีจำนวนเต็ม เช่น <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mo>…</mo></mrow><annotation encoding="application/x-tex">0,1,2,\ldots</annotation></semantics></math></span></p>
+<p>ตัวอย่าง:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mn>0</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">x[0]</annotation></semantics></math></span>: ค่าที่เวลา 0 วินาที</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">x[1]</annotation></semantics></math></span>: ค่าที่เวลา 0.01 วินาที</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mn>100</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">x[100]</annotation></semantics></math></span>: ค่าที่เวลา 1 วินาที</li>
+</ul>
+<h3>ข้อจำกัดจากการ sampling</h3>
+<p>สัญญาณที่บันทึกด้วย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>f</mi><mi>s</mi></msub></mrow><annotation encoding="application/x-tex">f_s</annotation></semantics></math></span> มีความถี่ Nyquist เท่ากับ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>f</mi><mrow><mi mathvariant="normal">N</mi><mi mathvariant="normal">y</mi><mi mathvariant="normal">q</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>=</mo><mfrac><msub><mi>f</mi><mi>s</mi></msub><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">f_{\mathrm{Nyquist}}=\frac{f_s}{2}</annotation></semantics></math></span></div>
+<p>ของเราคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>f</mi><mrow><mi mathvariant="normal">N</mi><mi mathvariant="normal">y</mi><mi mathvariant="normal">q</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>=</mo><mn>50</mn><mtext> Hz</mtext></mrow><annotation encoding="application/x-tex">f_{\mathrm{Nyquist}}=50\text{ Hz}</annotation></semantics></math></span></div>
+<p>ความถี่ที่สูงกว่าขอบเขตนี้อาจปรากฏเป็นความถี่อื่นหลัง sampling ซึ่งเรียกว่า <strong>aliasing</strong></p>
+<p>จึงไม่ใช่ว่าเก็บ 100 ค่าต่อวินาทีแล้วจะวิเคราะห์ความถี่ได้ถึง 100 Hz และการเพิ่มความละเอียดของ FFT ภายหลังไม่ได้สร้างข้อมูลความถี่ที่เครื่องไม่ได้บันทึกขึ้นมาใหม่</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-03" class="chapter markdown-cell"><h2>3. “หนึ่งตัวอย่างข้อมูล” ของงานเราคืออะไร?</h2>
+<p>เราแบ่ง EEG เป็นช่วงละ 30 วินาที</p>
+<p>จำนวนค่าสัญญาณต่อช่วงคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>N</mi><mo>=</mo><msub><mi>f</mi><mi>s</mi></msub><mi>T</mi></mrow><annotation encoding="application/x-tex">N=f_sT</annotation></semantics></math></span></div>
+<p>แทนค่า:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>N</mi><mo>=</mo><mn>100</mn><mo>×</mo><mn>30</mn><mo>=</mo><mn>3000</mn></mrow><annotation encoding="application/x-tex">N=100\times30=3000</annotation></semantics></math></span></div>
+<p>หนึ่งช่วงจึงเป็นเวกเตอร์:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="bold">x</mi><mo>=</mo><mo stretchy="false">[</mo><mi>x</mi><mo stretchy="false">[</mo><mn>0</mn><mo stretchy="false">]</mo><mo separator="true">,</mo><mi>x</mi><mo stretchy="false">[</mo><mn>1</mn><mo stretchy="false">]</mo><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><mi>x</mi><mo stretchy="false">[</mo><mn>2999</mn><mo stretchy="false">]</mo><mo stretchy="false">]</mo><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mn>3000</mn></msup></mrow><annotation encoding="application/x-tex">\mathbf{x}
+=
+[x[0],x[1],\ldots,x[2999]]
+\in\mathbb{R}^{3000}</annotation></semantics></math></span></div>
+<p>สัญลักษณ์ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi mathvariant="double-struck">R</mi><mn>3000</mn></msup></mrow><annotation encoding="application/x-tex">\mathbb{R}^{3000}</annotation></semantics></math></span> หมายถึงชุดตัวเลขจริง 3,000 ตัว ไม่ได้หมายถึงภาพ 3,000 ภาพ</p>
+<p>แต่ละช่วงมีป้ายคำตอบ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>y</mi><mo>∈</mo><mo stretchy="false">{</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>2</mn><mo separator="true">,</mo><mn>3</mn><mo separator="true">,</mo><mn>4</mn><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">y\in\{0,1,2,3,4\}</annotation></semantics></math></span></div>
+<p>โค้ดเราแทนคลาสเป็น:</p>
+<div class="table-scroll" tabindex="0" aria-label="ตาราง เลื่อนแนวนอนได้"><table>
+<thead>
+<tr>
+<th style="text-align:right">ตัวเลข</th>
+<th>คลาส</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">0</td>
+<td>W</td>
+</tr>
+<tr>
+<td style="text-align:right">1</td>
+<td>N1</td>
+</tr>
+<tr>
+<td style="text-align:right">2</td>
+<td>N2</td>
+</tr>
+<tr>
+<td style="text-align:right">3</td>
+<td>N3</td>
+</tr>
+<tr>
+<td style="text-align:right">4</td>
+<td>REM</td>
+</tr>
+</tbody>
+</table></div>
+<p>ตัวเลขเหล่านี้เป็น <strong>รหัสหมวดหมู่</strong> ไม่ใช่ค่าความลึกของการนอน ดังนั้น REM ที่มีรหัส 4 ไม่ได้แปลว่าลึกกว่า N3 ที่มีรหัส 3</p>
+<p>ข้อมูลที่ใช้ฝึกเป็นคู่:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">(</mo><msub><mi mathvariant="bold">x</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>y</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(\mathbf{x}_i,y_i)</annotation></semantics></math></span></div>
+<p>คือ “ข้อมูลตัวอย่างที่ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span>” กับ “ป้ายอ้างอิงของตัวอย่างนั้น”</p>
+<p>ป้ายอ้างอิงมาจาก hypnogram ที่ผู้ให้คะแนนจัดทำไว้ ในข้อมูลเดิมมี sleep stages 3 และ 4 ซึ่งโค้ดเรารวมเป็น N3 ส่วน movement และ unknown ไม่อยู่ในห้าคลาสที่ใช้ฝึก <a href="https://physionet.org/content/sleep-edfx/1.0.0/">รายละเอียดข้อมูลและป้ายจาก PhysioNet</a></p>
+<p>คำว่า <strong>EEG epoch</strong> ในที่นี้คือช่วง 30 วินาที ส่วน <strong>training epoch</strong> หมายถึงรอบการฝึกผ่านชุดข้อมูล เป็นคนละความหมายกัน</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-04" class="chapter markdown-cell"><h2>4. ความถี่ แอมพลิจูด และเฟสต่างกันอย่างไร?</h2>
+<p>คลื่นไซน์พื้นฐานเขียนเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mo>=</mo><mi>A</mi><mi>sin</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>2</mn><mi>π</mi><mi>f</mi><mi>t</mi><mo>+</mo><mi>ϕ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">x(t)=A\sin(2\pi ft+\phi)</annotation></semantics></math></span></div>
+<p>ตัวแปรแต่ละตัวมีหน้าที่ต่างกัน:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span>: amplitude หรือขนาดการแกว่ง</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span>: frequency หรือจำนวนรอบต่อวินาที</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ϕ</mi></mrow><annotation encoding="application/x-tex">\phi</annotation></semantics></math></span>: phase หรือตำแหน่งเริ่มต้นของการแกว่ง</li>
+</ul>
+<p>เมื่อเป็นข้อมูล sampled:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo>=</mo><mi>A</mi><mi>sin</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mn>2</mn><mi>π</mi><mi>f</mi><mfrac><mi>n</mi><msub><mi>f</mi><mi>s</mi></msub></mfrac><mo>+</mo><mi>ϕ</mi><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">x[n]=A\sin\left(2\pi f\frac{n}{f_s}+\phi\right)</annotation></semantics></math></span></div>
+<p>ตัวอย่างสมมติ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>x</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo>=</mo><mn>20</mn><mi>sin</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mn>2</mn><mi>π</mi><mfrac><mrow><mn>2</mn><mi>n</mi></mrow><mn>100</mn></mfrac><mo fence="true">)</mo></mrow><mo>+</mo><mn>5</mn><mi>sin</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mn>2</mn><mi>π</mi><mfrac><mrow><mn>12</mn><mi>n</mi></mrow><mn>100</mn></mfrac><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">x[n]
+=
+20\sin\left(2\pi\frac{2n}{100}\right)
++
+5\sin\left(2\pi\frac{12n}{100}\right)</annotation></semantics></math></span></div>
+<p>นี่คือการรวมคลื่น:</p>
+<ul>
+<li>ความถี่ 2 Hz ขนาด 20</li>
+<li>ความถี่ 12 Hz ขนาด 5</li>
+</ul>
+<p>กราฟที่เห็นเป็นผลรวมของทั้งสอง ไม่ได้แสดงคลื่นแต่ละตัวแยกกัน</p>
+<h3>ขนาดสัญญาณกับกำลังสองของสัญญาณ</h3>
+<p>สำหรับคลื่นไซน์ที่พิจารณาครบคาบ ค่าเฉลี่ยกำลังสองคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">mean</mi><mo>⁡</mo><mo stretchy="false">(</mo><msup><mi>x</mi><mn>2</mn></msup><mo stretchy="false">)</mo><mo>=</mo><mfrac><msup><mi>A</mi><mn>2</mn></msup><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">\operatorname{mean}(x^2)=\frac{A^2}{2}</annotation></semantics></math></span></div>
+<p>ถ้า amplitude เพิ่มเป็นสองเท่า ค่าเฉลี่ยกำลังสองเพิ่มเป็นสี่เท่า</p>
+<p>นี่เป็นเหตุผลหนึ่งที่ต้องแยก:</p>
+<ul>
+<li><strong>Magnitude:</strong> ขนาดขององค์ประกอบความถี่</li>
+<li><strong>Power:</strong> ปริมาณที่สัมพันธ์กับกำลังสองของขนาด</li>
+</ul>
+<p>สองอย่างนี้ไม่ใช่ตัวเลขเดียวกัน และหน่วยก็ไม่เหมือนกัน</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-05" class="chapter markdown-cell"><h2>5. Fourier Transform ทำอะไร?</h2>
+<p>Fourier Transform ใช้อธิบายสัญญาณด้วยองค์ประกอบความถี่</p>
+<p>สำหรับข้อมูลจำนวน <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span> ค่า รูปแบบ DFT พื้นฐานคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><munderover><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>N</mi><mo>−</mo><mn>1</mn></mrow></munderover><mi>x</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>j</mi><mn>2</mn><mi>π</mi><mi>k</mi><mi>n</mi><mi mathvariant="normal">/</mi><mi>N</mi></mrow></msup></mrow><annotation encoding="application/x-tex">X[k]
+=
+\sum_{n=0}^{N-1}
+x[n]e^{-j2\pi kn/N}</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span>: ตำแหน่งตัวอย่างในเวลา</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span>: ตำแหน่งช่องความถี่</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span>: จำนวนจินตภาพที่ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>j</mi><mn>2</mn></msup><mo>=</mo><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">j^2=-1</annotation></semantics></math></span></li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>∑</mo></mrow><annotation encoding="application/x-tex">\sum</annotation></semantics></math></span>: ให้นำค่าที่ระบุทั้งหมดมาบวกกัน</li>
+</ul>
+<p>ส่วน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>e</mi><mrow><mo>−</mo><mi>j</mi><mi>θ</mi></mrow></msup><mo>=</mo><mi>cos</mi><mo>⁡</mo><mi>θ</mi><mo>−</mo><mi>j</mi><mi>sin</mi><mo>⁡</mo><mi>θ</mi></mrow><annotation encoding="application/x-tex">e^{-j\theta}=\cos\theta-j\sin\theta</annotation></semantics></math></span></div>
+<p>ทำให้สูตรนี้ตรวจความสอดคล้องของสัญญาณกับคลื่น cosine และ sine ของความถี่นั้น</p>
+<p>ผลลัพธ์เป็นจำนวนเชิงซ้อน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><msub><mi>a</mi><mi>k</mi></msub><mo>+</mo><mi>j</mi><msub><mi>b</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">X[k]=a_k+jb_k</annotation></semantics></math></span></div>
+<p>เราจึงแยกได้เป็น:</p>
+<p><strong>ขนาด</strong></p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">∣</mi><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mi mathvariant="normal">∣</mi><mo>=</mo><msqrt><mrow><msubsup><mi>a</mi><mi>k</mi><mn>2</mn></msubsup><mo>+</mo><msubsup><mi>b</mi><mi>k</mi><mn>2</mn></msubsup></mrow></msqrt></mrow><annotation encoding="application/x-tex">|X[k]|=\sqrt{a_k^2+b_k^2}</annotation></semantics></math></span></div>
+<p>และ <strong>เฟส</strong></p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>arg</mi><mo>⁡</mo><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><mi mathvariant="normal">atan2</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>b</mi><mi>k</mi></msub><mo separator="true">,</mo><msub><mi>a</mi><mi>k</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\arg X[k]=\operatorname{atan2}(b_k,a_k)</annotation></semantics></math></span></div>
+<p>ถ้าเรานำเพียง <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∣</mi><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo stretchy="false">]</mo><mi mathvariant="normal">∣</mi></mrow><annotation encoding="application/x-tex">|X[k]|</annotation></semantics></math></span> ไปใช้ เรากำลังเก็บข้อมูลขนาด แต่ไม่ได้เก็บเฟสครบเหมือนผลเชิงซ้อนเดิม</p>
+<p>ส่วน <strong>FFT</strong> เป็นวิธีคำนวณ DFT อย่างมีประสิทธิภาพ ไม่ใช่โจทย์ทางคณิตศาสตร์คนละอย่างกับ DFT</p>
+<h3>ข้อจำกัดของการแปลงทั้งช่วงครั้งเดียว</h3>
+<p>ถ้าแปลง EEG ทั้ง 30 วินาทีครั้งเดียว เราจะรู้ว่าในช่วงนั้นมีความถี่อะไรบ้าง แต่รายละเอียดว่าองค์ประกอบนั้นเกิดช่วงต้น กลาง หรือท้าย อาจไม่ชัด</p>
+<p>จึงต้องใช้ STFT</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-06" class="chapter markdown-cell"><h2>6. STFT เพิ่มมิติของเวลาอย่างไร?</h2>
+<p><strong>STFT — Short-Time Fourier Transform</strong> ทำ Fourier Transform บนหน้าต่างย่อย แล้วเลื่อนหน้าต่างไปตามเวลา</p>
+<p>ให้:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi></mrow><annotation encoding="application/x-tex">L</annotation></semantics></math></span>: ความยาวหน้าต่าง</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>H</mi></mrow><annotation encoding="application/x-tex">H</annotation></semantics></math></span>: ระยะเลื่อน หรือ hop</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span>: หมายเลขหน้าต่าง</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span>: จำนวนจุด FFT</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">w[n]</annotation></semantics></math></span>: ฟังก์ชันหน้าต่าง</li>
+</ul>
+<p>เขียนได้ว่า:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo stretchy="false">[</mo><mi>m</mi><mo separator="true">,</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><mi>C</mi><munderover><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>0</mn></mrow><mrow><mi>L</mi><mo>−</mo><mn>1</mn></mrow></munderover><mi>x</mi><mo stretchy="false">[</mo><mi>m</mi><mi>H</mi><mo>+</mo><mi>n</mi><mo stretchy="false">]</mo><mi>w</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>j</mi><mn>2</mn><mi>π</mi><mi>k</mi><mi>n</mi><mi mathvariant="normal">/</mi><mi>M</mi></mrow></msup></mrow><annotation encoding="application/x-tex">X[m,k]
+=
+C
+\sum_{n=0}^{L-1}
+x[mH+n]w[n]e^{-j2\pi kn/M}</annotation></semantics></math></span></div>
+<p><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>C</mi></mrow><annotation encoding="application/x-tex">C</annotation></semantics></math></span> เป็นค่าปรับสเกลของการคำนวณ ในการใช้ <code>scipy.signal.stft</code> แบบ <code>spectrum</code> ที่โค้ดเราใช้ ค่านี้สอดคล้องกับ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>C</mi><mo>=</mo><mfrac><mn>1</mn><mrow><munder><mo>∑</mo><mi>n</mi></munder><mi>w</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo></mrow></mfrac></mrow><annotation encoding="application/x-tex">C=\frac{1}{\sum_n w[n]}</annotation></semantics></math></span></div>
+<p>ผลลัพธ์มีสองดัชนี:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi></mrow><annotation encoding="application/x-tex">m</annotation></semantics></math></span>: เวลา</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span>: ความถี่</li>
+</ul>
+<p>จึงเป็นข้อมูลเวลา–ความถี่</p>
+<h3>พารามิเตอร์ที่โค้ดเราใช้จริง</h3>
+<pre><code class="language-python">stft(
+    signal_uv,
+    fs=100,
+    window=&quot;hamming&quot;,
+    nperseg=200,
+    noverlap=100,
+    nfft=256,
+    boundary=None,
+    padded=False,
+)
+</code></pre>
+<p>แปลว่า:</p>
+<ul>
+<li>หน้าต่าง 200 samples หรือประมาณ 2 วินาที</li>
+<li>หน้าต่างซ้อนกัน 100 samples</li>
+<li>เลื่อนครั้งละ 100 samples หรือ 1 วินาที</li>
+<li>ใช้ FFT 256 จุด</li>
+<li>ไม่ต่อสัญญาณเพิ่มที่ขอบ และไม่เติมส่วนท้ายเพื่อเพิ่มจำนวนหน้าต่าง</li>
+</ul>
+<p>หลักการพารามิเตอร์และการปรับสเกลนี้ตรวจจาก <a href="https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html">เอกสาร STFT ของ SciPy</a></p>
+<h3>ทำไมต้องมี Hamming window?</h3>
+<p>การตัดสัญญาณเป็นช่วงสั้น ๆ ทำให้เกิดขอบช่วง ซึ่งอาจกระจายพลังงานสเปกตรัมไปยังความถี่รอบข้าง เรียกว่า <strong>spectral leakage</strong></p>
+<p>หน้าต่างช่วยลดผลของขอบนั้น</p>
+<p>สำหรับ Hamming แบบ periodic ที่ใช้กับ FFT เขียนเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>w</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo>=</mo><mn>0.54</mn><mo>−</mo><mn>0.46</mn><mi>cos</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mfrac><mrow><mn>2</mn><mi>π</mi><mi>n</mi></mrow><mi>L</mi></mfrac><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">w[n]
+=
+0.54-0.46\cos\left(\frac{2\pi n}{L}\right)</annotation></semantics></math></span></div>
+<p>มันให้น้ำหนักบริเวณกลางหน้าต่างมากกว่าบริเวณขอบ</p>
+<p>แต่มีข้อแลกเปลี่ยน: การลด leakage ไม่ได้หมายความว่าจะรักษาความละเอียดในการแยกความถี่ได้ทุกอย่างพร้อมกัน</p>
+<h3>ทำไมผลเป็น 129 × 29?</h3>
+<p>จำนวนช่องเวลาคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>N</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">e</mi></mrow></msub><mo>=</mo><mn>1</mn><mo>+</mo><mrow><mo fence="true">⌊</mo><mfrac><mrow><mi>N</mi><mo>−</mo><mi>L</mi></mrow><mi>H</mi></mfrac><mo fence="true">⌋</mo></mrow></mrow><annotation encoding="application/x-tex">N_{\mathrm{time}}
+=
+1+\left\lfloor\frac{N-L}{H}\right\rfloor</annotation></semantics></math></span></div>
+<p>ของเรา:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>N</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">e</mi></mrow></msub><mo>=</mo><mn>1</mn><mo>+</mo><mrow><mo fence="true">⌊</mo><mfrac><mrow><mn>3000</mn><mo>−</mo><mn>200</mn></mrow><mn>100</mn></mfrac><mo fence="true">⌋</mo></mrow><mo>=</mo><mn>29</mn></mrow><annotation encoding="application/x-tex">N_{\mathrm{time}}
+=
+1+\left\lfloor\frac{3000-200}{100}\right\rfloor
+=29</annotation></semantics></math></span></div>
+<p>สำหรับสัญญาณจริง เมื่อเก็บสเปกตรัมด้านเดียวจาก FFT 256 จุด:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>N</mi><mrow><mi mathvariant="normal">f</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">q</mi></mrow></msub><mo>=</mo><mfrac><mn>256</mn><mn>2</mn></mfrac><mo>+</mo><mn>1</mn><mo>=</mo><mn>129</mn></mrow><annotation encoding="application/x-tex">N_{\mathrm{freq}}
+=
+\frac{256}{2}+1
+=129</annotation></semantics></math></span></div>
+<p>จึงได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>X</mi><mo>∈</mo><msup><mi mathvariant="double-struck">C</mi><mrow><mn>129</mn><mo>×</mo><mn>29</mn></mrow></msup></mrow><annotation encoding="application/x-tex">X\in\mathbb{C}^{129\times29}</annotation></semantics></math></span></div>
+<p>ช่องความถี่ห่างกัน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mi>f</mi><mo>=</mo><mfrac><msub><mi>f</mi><mi>s</mi></msub><mi>M</mi></mfrac><mo>=</mo><mfrac><mn>100</mn><mn>256</mn></mfrac><mo>=</mo><mn>0.390625</mn><mtext> Hz</mtext></mrow><annotation encoding="application/x-tex">\Delta f=\frac{f_s}{M}
+=
+\frac{100}{256}
+=
+0.390625\text{ Hz}</annotation></semantics></math></span></div>
+<p>อย่างไรก็ตาม <strong>ระยะห่างของช่อง FFT ไม่เท่ากับความสามารถจริงในการแยกสองความถี่ที่อยู่ใกล้กัน</strong> ความสามารถนั้นขึ้นกับความยาวหน้าต่างและรูปแบบหน้าต่างด้วย</p>
+<p>การเติมศูนย์จาก 200 เป็น 256 จุดทำให้มีช่องสำหรับอ่านสเปกตรัมมากขึ้น แต่ไม่ได้เพิ่มเวลาที่เราสังเกตสัญญาณ</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-07" class="chapter markdown-cell"><h2>7. ทำไมจึงใช้ logarithm?</h2>
+<p>โค้ดเราคำนวณ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>F</mi><mo stretchy="false">[</mo><mi>k</mi><mo separator="true">,</mo><mi>m</mi><mo stretchy="false">]</mo><mo>=</mo><mi>ln</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mi mathvariant="normal">∣</mi><mi>X</mi><mo stretchy="false">[</mo><mi>k</mi><mo separator="true">,</mo><mi>m</mi><mo stretchy="false">]</mo><mi mathvariant="normal">∣</mi><mo>+</mo><msub><mi>ϵ</mi><mi>log</mi><mo>⁡</mo></msub><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">F[k,m]
+=
+\ln\left(|X[k,m]|+\epsilon_{\log}\right)</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>ϵ</mi><mi>log</mi><mo>⁡</mo></msub><mo>=</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>6</mn></mrow></msup></mrow><annotation encoding="application/x-tex">\epsilon_{\log}=10^{-6}</annotation></semantics></math></span></div>
+<p>เหตุผลของ epsilon คือหลีกเลี่ยง:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo stretchy="false">)</mo><mo>=</mo><mo>−</mo><mi mathvariant="normal">∞</mi></mrow><annotation encoding="application/x-tex">\ln(0)=-\infty</annotation></semantics></math></span></div>
+<p>และ log ช่วยบีบช่วงค่าที่ต่างกันมาก</p>
+<p>ตัวอย่างสมมติ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mo stretchy="false">)</mo><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\ln(1)=0</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>10</mn><mo stretchy="false">)</mo><mo>≈</mo><mn>2.30</mn></mrow><annotation encoding="application/x-tex">\ln(10)\approx2.30</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>100</mn><mo stretchy="false">)</mo><mo>≈</mo><mn>4.61</mn></mrow><annotation encoding="application/x-tex">\ln(100)\approx4.61</annotation></semantics></math></span></div>
+<p>ค่าที่เดิมต่างกัน 100 เท่า จึงไม่ต่างกันถึง 100 หน่วยหลังแปลง log</p>
+<p><strong>ข้อสำคัญ: ของเราเป็น log-magnitude ไม่ใช่ log-power</strong></p>
+<p>ของเราใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi mathvariant="normal">∣</mi><mi>X</mi><mi mathvariant="normal">∣</mi><mo>+</mo><mi>ϵ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\ln(|X|+\epsilon)</annotation></semantics></math></span></div>
+<p>ไม่ได้ใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi mathvariant="normal">∣</mi><mi>X</mi><msup><mi mathvariant="normal">∣</mi><mn>2</mn></msup><mo>+</mo><mi>ϵ</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\ln(|X|^2+\epsilon)</annotation></semantics></math></span></div>
+<p>แม้จะสัมพันธ์กัน แต่ไม่ควรใช้ชื่อแทนกันโดยไม่ระบุ</p>
+<p>หลังขั้นตอนนี้ หนึ่ง EEG epoch กลายเป็นเมทริกซ์ตัวเลขจริง:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>F</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mn>129</mn><mo>×</mo><mn>29</mn></mrow></msup></mrow><annotation encoding="application/x-tex">F\in\mathbb{R}^{129\times29}</annotation></semantics></math></span></div>
+<p>เรามองมันเป็นภาพหนึ่งช่องสีได้ แต่สีที่วาดให้คนดูเป็นเพียงการแสดงค่าตัวเลข โมเดลไม่ได้เห็นสีสวย ๆ เหมือนในวิดีโอ มันเห็นเมทริกซ์ตัวเลข</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-08" class="chapter markdown-cell"><h2>8. ค่าเฉลี่ย ความแปรปรวน และ normalization</h2>
+<p>ก่อนเข้า neural network เราปรับสเกลของฟีเจอร์</p>
+<p>เริ่มจากตัวเลข <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>a</mi><mn>1</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi>a</mi><mi>N</mi></msub></mrow><annotation encoding="application/x-tex">a_1,\ldots,a_N</annotation></semantics></math></span></p>
+<p>ค่าเฉลี่ยคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>μ</mi><mo>=</mo><mfrac><mn>1</mn><mi>N</mi></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover><msub><mi>a</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">\mu=\frac{1}{N}\sum_{i=1}^{N}a_i</annotation></semantics></math></span></div>
+<p>ความแปรปรวนแบบหารด้วย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span> คือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>σ</mi><mn>2</mn></msup><mo>=</mo><mfrac><mn>1</mn><mi>N</mi></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover><mo stretchy="false">(</mo><msub><mi>a</mi><mi>i</mi></msub><mo>−</mo><mi>μ</mi><msup><mo stretchy="false">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\sigma^2
+=
+\frac{1}{N}\sum_{i=1}^{N}(a_i-\mu)^2</annotation></semantics></math></span></div>
+<p>ส่วนเบี่ยงเบนมาตรฐานคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>σ</mi><mo>=</mo><msqrt><msup><mi>σ</mi><mn>2</mn></msup></msqrt></mrow><annotation encoding="application/x-tex">\sigma=\sqrt{\sigma^2}</annotation></semantics></math></span></div>
+<p>สูตรมาตรฐานในการปรับข้อมูลคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>z</mi><mi>i</mi></msub><mo>=</mo><mfrac><mrow><msub><mi>a</mi><mi>i</mi></msub><mo>−</mo><mi>μ</mi></mrow><mi>σ</mi></mfrac></mrow><annotation encoding="application/x-tex">z_i=\frac{a_i-\mu}{\sigma}</annotation></semantics></math></span></div>
+<p>ความหมายของ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">z_i</annotation></semantics></math></span> คือ:</p>
+<blockquote>
+<p>ค่านี้อยู่ห่างจากค่าเฉลี่ยกี่ส่วนเบี่ยงเบนมาตรฐาน?</p>
+</blockquote>
+<p>ตัวอย่างสมมติ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>a</mi><mo>=</mo><mn>12</mn><mo separator="true">,</mo><mspace width="1em"/><mi>μ</mi><mo>=</mo><mn>10</mn><mo separator="true">,</mo><mspace width="1em"/><mi>σ</mi><mo>=</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">a=12,\quad \mu=10,\quad \sigma=2</annotation></semantics></math></span></div>
+<p>จะได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>z</mi><mo>=</mo><mfrac><mrow><mn>12</mn><mo>−</mo><mn>10</mn></mrow><mn>2</mn></mfrac><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">z=\frac{12-10}{2}=1</annotation></semantics></math></span></div>
+<p>จึงสูงกว่าค่าเฉลี่ยหนึ่ง SD</p>
+<p>การปรับนี้ไม่ได้บังคับให้ข้อมูลกลายเป็นการแจกแจงปกติ เพียงปรับศูนย์กลางและสเกล</p>
+<h3>ของเราไม่ได้คำนวณค่าเฉลี่ยหนึ่งค่าครอบทั้งภาพ</h3>
+<p>ให้ฟีเจอร์ของคืนหนึ่งเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>F</mi><mrow><mi>e</mi><mo separator="true">,</mo><mi>f</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">F_{e,f,t}</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>e</mi></mrow><annotation encoding="application/x-tex">e</annotation></semantics></math></span>: EEG epoch ภายในคืนนี้</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>f</mi></mrow><annotation encoding="application/x-tex">f</annotation></semantics></math></span>: ช่องความถี่</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span>: ช่องเวลาภายในภาพ STFT</li>
+</ul>
+<p>R1 คำนวณ <strong>แยกตามความถี่</strong>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>μ</mi><mi>f</mi></msub><mo>=</mo><mfrac><mn>1</mn><mrow><mi>E</mi><mtext> </mtext><mi>T</mi></mrow></mfrac><munderover><mo>∑</mo><mrow><mi>e</mi><mo>=</mo><mn>1</mn></mrow><mi>E</mi></munderover><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>F</mi><mrow><mi>e</mi><mo separator="true">,</mo><mi>f</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\mu_f
+=
+\frac{1}{E\,T}
+\sum_{e=1}^{E}\sum_{t=1}^{T}F_{e,f,t}</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>σ</mi><mi>f</mi><mn>2</mn></msubsup><mo>=</mo><mfrac><mn>1</mn><mrow><mi>E</mi><mtext> </mtext><mi>T</mi></mrow></mfrac><munderover><mo>∑</mo><mrow><mi>e</mi><mo>=</mo><mn>1</mn></mrow><mi>E</mi></munderover><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mo stretchy="false">(</mo><msub><mi>F</mi><mrow><mi>e</mi><mo separator="true">,</mo><mi>f</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mo>−</mo><msub><mi>μ</mi><mi>f</mi></msub><msup><mo stretchy="false">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">\sigma_f^2
+=
+\frac{1}{E\,T}
+\sum_{e=1}^{E}\sum_{t=1}^{T}
+(F_{e,f,t}-\mu_f)^2</annotation></semantics></math></span></div>
+<p>ของเรามี <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo>=</mo><mn>29</mn></mrow><annotation encoding="application/x-tex">T=29</annotation></semantics></math></span></p>
+<p>แล้วปรับ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>F</mi><mo stretchy="true">~</mo></mover><mrow><mi>e</mi><mo separator="true">,</mo><mi>f</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mo>=</mo><mfrac><mrow><msub><mi>F</mi><mrow><mi>e</mi><mo separator="true">,</mo><mi>f</mi><mo separator="true">,</mo><mi>t</mi></mrow></msub><mo>−</mo><msub><mi>μ</mi><mi>f</mi></msub></mrow><mrow><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>σ</mi><mi>f</mi></msub><mo separator="true">,</mo><msub><mi>ϵ</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">d</mi></mrow></msub><mo stretchy="false">)</mo></mrow></mfrac></mrow><annotation encoding="application/x-tex">\widetilde F_{e,f,t}
+=
+\frac{F_{e,f,t}-\mu_f}
+{\max(\sigma_f,\epsilon_{\mathrm{std}})}</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>ϵ</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">d</mi></mrow></msub><mo>=</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>3</mn></mrow></msup></mrow><annotation encoding="application/x-tex">\epsilon_{\mathrm{std}}=10^{-3}</annotation></semantics></math></span></div>
+<p>จึงมีค่าเฉลี่ย 129 ค่า และ SD 129 ค่า ไม่ใช่ค่าเดียวสำหรับทุกความถี่</p>
+<p>ถ้า SD เป็นศูนย์หรือเล็กมาก เราใช้ epsilon ป้องกันการหารด้วยค่าที่เล็กจนทำให้ผลพุ่งหรือไม่เป็นจำนวนจำกัด</p>
+<p>epsilon ของ normalization กับ epsilon ก่อน log มีหน้าที่ต่างกัน</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-09" class="chapter markdown-cell"><h2>9. ฐานกับ R1 ต่างกันตรงไหนในสูตร?</h2>
+<h3>ฐาน: สถิติร่วมจาก train</h3>
+<p>คำนวณ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>μ</mi><mi>f</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msubsup><mo separator="true">,</mo><mspace width="1em"/><msubsup><mi>σ</mi><mi>f</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msubsup></mrow><annotation encoding="application/x-tex">\mu_f^{\mathrm{train}},
+\quad
+\sigma_f^{\mathrm{train}}</annotation></semantics></math></span></div>
+<p>จากทุกคืนที่เป็น train subjects ของ fold นั้น</p>
+<p>แล้วใช้กับทุกคืน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>F</mi><mo stretchy="true">~</mo></mover><mo>=</mo><mfrac><mrow><mi>F</mi><mo>−</mo><msubsup><mi>μ</mi><mi>f</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msubsup></mrow><msubsup><mi>σ</mi><mi>f</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msubsup></mfrac></mrow><annotation encoding="application/x-tex">\widetilde F
+=
+\frac{F-\mu_f^{\mathrm{train}}}
+{\sigma_f^{\mathrm{train}}}</annotation></semantics></math></span></div>
+<p>จุดสำคัญคือคืน validation/test ไม่ได้ร่วมสร้างสถิติชุดนี้</p>
+<h3>R1: สถิติของคืนตัวเอง</h3>
+<p>สำหรับคืน <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">n</annotation></semantics></math></span>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>μ</mi><mrow><mi>n</mi><mo separator="true">,</mo><mi>f</mi></mrow></msub><mo separator="true">,</mo><mspace width="1em"/><msub><mi>σ</mi><mrow><mi>n</mi><mo separator="true">,</mo><mi>f</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\mu_{n,f},
+\quad
+\sigma_{n,f}</annotation></semantics></math></span></div>
+<p>แล้วใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mover accent="true"><mi>F</mi><mo stretchy="true">~</mo></mover><mrow><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow></msup><mo>=</mo><mfrac><mrow><msup><mi>F</mi><mrow><mo stretchy="false">(</mo><mi>n</mi><mo stretchy="false">)</mo></mrow></msup><mo>−</mo><msub><mi>μ</mi><mrow><mi>n</mi><mo separator="true">,</mo><mi>f</mi></mrow></msub></mrow><mrow><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi>σ</mi><mrow><mi>n</mi><mo separator="true">,</mo><mi>f</mi></mrow></msub><mo separator="true">,</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>3</mn></mrow></msup><mo stretchy="false">)</mo></mrow></mfrac></mrow><annotation encoding="application/x-tex">\widetilde F^{(n)}
+=
+\frac{F^{(n)}-\mu_{n,f}}
+{\max(\sigma_{n,f},10^{-3})}</annotation></semantics></math></span></div>
+<p>ดังนั้นคืน validation/test ก็ใช้สัญญาณของตัวเองสร้างสถิติ</p>
+<p>นี่คือความหมายของ <strong>transductive preprocessing</strong> ในงานเรา: ขั้นตอนเตรียมข้อมูลเข้าถึงสัญญาณที่กำลังจะประเมิน แม้ไม่ใช้ป้ายคลาสในสูตร mean/std</p>
+<p>มันเป็น protocol ที่ต้องเปิดเผย ไม่ควรอธิบายว่า R1 ใช้สถิติจาก train เท่านั้น</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-10" class="chapter markdown-cell"><h2>10. ทำไม normalization รายคืนอาจช่วยได้? ดูจากสมการ</h2>
+<p>สมมติสัญญาณสองคืนต่างกันด้วย gain คงที่:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>x</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo>=</mo><mi>a</mi><mtext> </mtext><mi>x</mi><mo stretchy="false">[</mo><mi>n</mi><mo stretchy="false">]</mo><mo separator="true">,</mo><mspace width="2em"/><mi>a</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">x&#x27;[n]=a\,x[n],\qquad a&gt;0</annotation></semantics></math></span></div>
+<p>เพราะ STFT เป็นการแปลงเชิงเส้น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>X</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo stretchy="false">[</mo><mi>m</mi><mo separator="true">,</mo><mi>k</mi><mo stretchy="false">]</mo><mo>=</mo><mi>a</mi><mi>X</mi><mo stretchy="false">[</mo><mi>m</mi><mo separator="true">,</mo><mi>k</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">X&#x27;[m,k]=aX[m,k]</annotation></semantics></math></span></div>
+<p>ถ้าขนาดสเปกตรัมมากกว่า epsilon มากพอ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>F</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>ln</mi><mo>⁡</mo><mi mathvariant="normal">∣</mi><msup><mi>X</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mi mathvariant="normal">∣</mi><mo>=</mo><mi>ln</mi><mo>⁡</mo><mi mathvariant="normal">∣</mi><mi>a</mi><mi>X</mi><mi mathvariant="normal">∣</mi><mo>=</mo><mi>ln</mi><mo>⁡</mo><mi>a</mi><mo>+</mo><mi>ln</mi><mo>⁡</mo><mi mathvariant="normal">∣</mi><mi>X</mi><mi mathvariant="normal">∣</mi></mrow><annotation encoding="application/x-tex">F&#x27;
+=
+\ln|X&#x27;|
+=
+\ln|aX|
+=
+\ln a+\ln|X|</annotation></semantics></math></span></div>
+<p>จึงได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>F</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>F</mi><mo>+</mo><mi>ln</mi><mo>⁡</mo><mi>a</mi></mrow><annotation encoding="application/x-tex">F&#x27;=F+\ln a</annotation></semantics></math></span></div>
+<p>การเพิ่ม gain ของสัญญาณกลายเป็นการเลื่อนค่าของ log-magnitude</p>
+<p>ค่าเฉลี่ยจึงเลื่อน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>μ</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>μ</mi><mo>+</mo><mi>ln</mi><mo>⁡</mo><mi>a</mi></mrow><annotation encoding="application/x-tex">\mu&#x27;=\mu+\ln a</annotation></semantics></math></span></div>
+<p>แต่ SD ไม่เปลี่ยนจากการเพิ่มค่าคงที่:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>σ</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>σ</mi></mrow><annotation encoding="application/x-tex">\sigma&#x27;=\sigma</annotation></semantics></math></span></div>
+<p>เมื่อ normalize:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><msup><mi>F</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>−</mo><msup><mi>μ</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mrow><msup><mi>σ</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup></mfrac><mo>=</mo><mfrac><mrow><mi>F</mi><mo>+</mo><mi>ln</mi><mo>⁡</mo><mi>a</mi><mo>−</mo><mi>μ</mi><mo>−</mo><mi>ln</mi><mo>⁡</mo><mi>a</mi></mrow><mi>σ</mi></mfrac><mo>=</mo><mfrac><mrow><mi>F</mi><mo>−</mo><mi>μ</mi></mrow><mi>σ</mi></mfrac></mrow><annotation encoding="application/x-tex">\frac{F&#x27;-\mu&#x27;}{\sigma&#x27;}
+=
+\frac{F+\ln a-\mu-\ln a}{\sigma}
+=
+\frac{F-\mu}{\sigma}</annotation></semantics></math></span></div>
+<p>ในตัวอย่างอุดมคตินี้ ผลหลัง normalization จึงเหมือนกัน</p>
+<p>ทั่วไป ถ้าฟีเจอร์ในช่องความถี่หนึ่งสัมพันธ์กันแบบ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>F</mi><mo mathvariant="normal" lspace="0em" rspace="0em">′</mo></msup><mo>=</mo><mi>a</mi><mi>F</mi><mo>+</mo><mi>b</mi><mo separator="true">,</mo><mspace width="2em"/><mi>a</mi><mo>&gt;</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">F&#x27;=aF+b,\qquad a&gt;0</annotation></semantics></math></span></div>
+<p>การใช้ mean/std ของตัวเองสามารถหักล้างการเลื่อนและการขยายสเกลได้ เมื่อ std floor ไม่ทำงาน</p>
+<p><strong>นี่เป็นเหตุผลเชิงคณิตศาสตร์ที่สนับสนุนแนวคิด R1 แต่ไม่ใช่หลักฐานว่าความผิดพลาดทุกคืนเกิดจาก gain หรือ offset เท่านั้น</strong></p>
+<p>สัญญาณจริงอาจต่างกันในรูปแบบที่ซับซ้อนกว่านี้ เช่น สิ่งรบกวนที่เปลี่ยนตามเวลา หรือความต่างทางสรีรวิทยาที่มีความหมายจริง</p>
+<h3>ข้อแลกเปลี่ยนที่สำคัญ</h3>
+<p>ค่าเฉลี่ยทั้งคืนขึ้นกับว่าในคืนนั้นมีแต่ละคลาสมากแค่ไหนด้วย</p>
+<p>ให้ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">\pi_c</annotation></semantics></math></span> เป็นสัดส่วนคลาส <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span> และ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>μ</mi><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">\mu_c</annotation></semantics></math></span> เป็นค่าเฉลี่ยฟีเจอร์ของคลาสนั้น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>μ</mi><mo>=</mo><munder><mo>∑</mo><mi>c</mi></munder><msub><mi>π</mi><mi>c</mi></msub><msub><mi>μ</mi><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">\mu=\sum_c\pi_c\mu_c</annotation></semantics></math></span></div>
+<p>ความแปรปรวนรวมมีรูปแบบ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>σ</mi><mn>2</mn></msup><mo>=</mo><munder><mo>∑</mo><mi>c</mi></munder><msub><mi>π</mi><mi>c</mi></msub><mrow><mo fence="true">[</mo><msubsup><mi>σ</mi><mi>c</mi><mn>2</mn></msubsup><mo>+</mo><mo stretchy="false">(</mo><msub><mi>μ</mi><mi>c</mi></msub><mo>−</mo><mi>μ</mi><msup><mo stretchy="false">)</mo><mn>2</mn></msup><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">\sigma^2
+=
+\sum_c
+\pi_c
+\left[
+\sigma_c^2+(\mu_c-\mu)^2
+\right]</annotation></semantics></math></span></div>
+<p>จึงมีทั้งความแปรปรวน <strong>ภายในคลาส</strong> และความต่าง <strong>ระหว่างคลาส</strong></p>
+<p>หากคืนหนึ่งมี W มาก อีกคืนมี N3 มาก สถิติทั้งคืนอาจต่างกันได้แม้เครื่องบันทึกไม่ผิดเลย</p>
+<p>ดังนั้น per-night normalization อาจช่วยลดความต่างที่ไม่ต้องการ แต่ก็อาจลดข้อมูลเกี่ยวกับระดับ absolute amplitude ที่มีประโยชน์ด้วย ไม่ใช่การปรับที่ดีโดยไม่มีข้อแลกเปลี่ยน</p>
+<p>เรื่องนี้ยังอธิบายว่า ทำไมการเปลี่ยนช่วงที่ใช้สร้างสถิติจาก “ช่วงที่ตัดไว้” เป็น “PSG ทั้งคืน” อาจทำให้ผลต่างกันได้ เป็นความเป็นไปได้ทางคณิตศาสตร์ ไม่ใช่การยืนยันสาเหตุของผล sensitivity ที่เราเห็น</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-11" class="chapter markdown-cell"><h2>11. Tensor ที่โมเดลเราได้รับมีหน้าตาอย่างไร?</h2>
+<p>Tensor คือชุดตัวเลขที่มีหลายแกน</p>
+<p>อินพุตของโมเดลเราเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="bold">X</mi><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mi>B</mi><mo>×</mo><mi>S</mi><mo>×</mo><mn>1</mn><mo>×</mo><mn>129</mn><mo>×</mo><mn>29</mn></mrow></msup></mrow><annotation encoding="application/x-tex">\mathbf X
+\in
+\mathbb R^{B\times S\times1\times129\times29}</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi></mrow><annotation encoding="application/x-tex">B</annotation></semantics></math></span>: จำนวน sequences ใน batch</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span>: จำนวน EEG epochs ต่อ sequence</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn></mrow><annotation encoding="application/x-tex">1</annotation></semantics></math></span>: หนึ่งช่องภาพ</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>129</mn></mrow><annotation encoding="application/x-tex">129</annotation></semantics></math></span>: ช่องความถี่</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>29</mn></mrow><annotation encoding="application/x-tex">29</annotation></semantics></math></span>: ช่องเวลาใน STFT</li>
+</ul>
+<p>config ฐานใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>B</mi><mo>=</mo><mn>32</mn><mo separator="true">,</mo><mspace width="2em"/><mi>S</mi><mo>=</mo><mn>20</mn></mrow><annotation encoding="application/x-tex">B=32,\qquad S=20</annotation></semantics></math></span></div>
+<p>จึงเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mn>32</mn><mo separator="true">,</mo><mn>20</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>129</mn><mo separator="true">,</mo><mn>29</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[32,20,1,129,29]</annotation></semantics></math></span></div>
+<p>หนึ่ง sequence ครอบคลุม:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mn>20</mn><mo>×</mo><mn>30</mn><mo>=</mo><mn>600</mn><mtext> วินาที</mtext></mrow><annotation encoding="application/x-tex">20\times30=600\text{ วินาที}</annotation></semantics></math></span></div>
+<p>หรือ 10 นาที</p>
+<p>หนึ่ง batch เต็มจึงมี:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mn>32</mn><mo>×</mo><mn>20</mn><mo>=</mo><mn>640</mn></mrow><annotation encoding="application/x-tex">32\times20=640</annotation></semantics></math></span></div>
+<p>EEG epochs ที่ถูกป้อนใน sequence ต่าง ๆ ไม่ใช่คน 640 คน และบาง epoch อาจปรากฏซ้ำเพราะหน้าต่างซ้อนกัน</p>
+<p>ก่อนเข้า CNN โค้ดรวมสองแกนแรก:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mi>B</mi><mo separator="true">,</mo><mi>S</mi><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>129</mn><mo separator="true">,</mo><mn>29</mn><mo stretchy="false">]</mo><mo>⟶</mo><mo stretchy="false">[</mo><mi>B</mi><mi>S</mi><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>129</mn><mo separator="true">,</mo><mn>29</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[B,S,1,129,29]
+\longrightarrow
+[B S,1,129,29]</annotation></semantics></math></span></div>
+<p>CNN จึงอ่านภาพ EEG ทีละภาพ แต่คำนวณหลายภาพพร้อมกัน จากนั้นจัดกลับเป็นลำดับเพื่อส่งเข้า GRU</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-12" class="chapter markdown-cell"><h2>12. CNN คำนวณอะไรจริง ๆ?</h2>
+<h3>12.1 การคูณน้ำหนักพื้นฐาน</h3>
+<p>หน่วยคำนวณง่าย ๆ เขียนได้ว่า:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>a</mi><mo>=</mo><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mi>i</mi></msub><msub><mi>x</mi><mi>i</mi></msub><mo>+</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">a=\sum_iw_ix_i+b</annotation></semantics></math></span></div>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">x_i</annotation></semantics></math></span>: ค่าข้อมูล</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">w_i</annotation></semantics></math></span>: น้ำหนักที่เรียนรู้ได้</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>b</mi></mrow><annotation encoding="application/x-tex">b</annotation></semantics></math></span>: bias ที่เรียนรู้ได้</li>
+</ul>
+<p>ตัวอย่างสมมติ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>a</mi><mo>=</mo><mn>0.5</mn><mo stretchy="false">(</mo><mn>1</mn><mo stretchy="false">)</mo><mo>−</mo><mn>0.2</mn><mo stretchy="false">(</mo><mn>2</mn><mo stretchy="false">)</mo><mo>+</mo><mn>0.3</mn><mo>=</mo><mn>0.4</mn></mrow><annotation encoding="application/x-tex">a=0.5(1)-0.2(2)+0.3=0.4</annotation></semantics></math></span></div>
+<p>โมเดลเปลี่ยน <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>w</mi><mi>i</mi></msub><mo separator="true">,</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">w_i,b</annotation></semantics></math></span> ระหว่างฝึก ไม่ได้ให้โปรแกรมเมอร์กำหนดทุกน้ำหนักด้วยมือ</p>
+<h3>12.2 Convolution ใช้ชุดน้ำหนักเดียวกันเลื่อนทั่วภาพ</h3>
+<p>สำหรับ kernel <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>3</mn><mo>×</mo><mn>3</mn></mrow><annotation encoding="application/x-tex">3\times3</annotation></semantics></math></span> รูปแบบการคำนวณคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>A</mi><mi>o</mi></msub><mo stretchy="false">[</mo><mi>i</mi><mo separator="true">,</mo><mi>j</mi><mo stretchy="false">]</mo><mo>=</mo><msub><mi>b</mi><mi>o</mi></msub><mo>+</mo><munder><mo>∑</mo><mi>c</mi></munder><munderover><mo>∑</mo><mrow><mi>u</mi><mo>=</mo><mn>0</mn></mrow><mn>2</mn></munderover><munderover><mo>∑</mo><mrow><mi>v</mi><mo>=</mo><mn>0</mn></mrow><mn>2</mn></munderover><msub><mi>W</mi><mrow><mi>o</mi><mo separator="true">,</mo><mi>c</mi><mo separator="true">,</mo><mi>u</mi><mo separator="true">,</mo><mi>v</mi></mrow></msub><msub><mi>X</mi><mi>c</mi></msub><mo stretchy="false">[</mo><mi>i</mi><mo>+</mo><mi>u</mi><mo>−</mo><mi>p</mi><mo separator="true">,</mo><mi>j</mi><mo>+</mo><mi>v</mi><mo>−</mo><mi>p</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">A_o[i,j]
+=
+b_o+
+\sum_{c}
+\sum_{u=0}^{2}
+\sum_{v=0}^{2}
+W_{o,c,u,v}
+X_c[i+u-p,j+v-p]</annotation></semantics></math></span></div>
+<p>โดย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi></mrow><annotation encoding="application/x-tex">p</annotation></semantics></math></span> คือ padding และ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>o</mi></mrow><annotation encoding="application/x-tex">o</annotation></semantics></math></span> คือช่องผลลัพธ์</p>
+<p>ใจความคือ:</p>
+<ol>
+<li>หยิบบริเวณเล็ก ๆ ของภาพ</li>
+<li>คูณกับน้ำหนัก</li>
+<li>บวกผล</li>
+<li>เลื่อนไปตำแหน่งถัดไป โดยใช้ชุดน้ำหนักเดิม</li>
+</ol>
+<p>การใช้ kernel ร่วมกันทั่วภาพลดจำนวนพารามิเตอร์ และทำให้โมเดลตรวจรูปแบบคล้ายกันในหลายตำแหน่งได้</p>
+<p>ใน PyTorch การคำนวณนี้ทางเทคนิคเป็น cross-correlation โดยไม่กลับ kernel แต่โดยทั่วไปยังเรียกชั้นนี้ว่า convolution</p>
+<h3>12.3 ReLU เพิ่มความไม่เป็นเชิงเส้น</h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">ReLU</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><mi>max</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>0</mn><mo separator="true">,</mo><mi>a</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\operatorname{ReLU}(a)=\max(0,a)</annotation></semantics></math></span></div>
+<p>ถ้าไม่มีความไม่เป็นเชิงเส้น การซ้อนชั้นเชิงเส้นหลายชั้นยังยุบเป็นการแปลงเชิงเส้นเดียวได้</p>
+<p>ReLU ทำให้โมเดลประกอบรูปแบบที่ซับซ้อนกว่า weighted sum อย่างเดียว</p>
+<h3>12.4 Max pooling ลดขนาดภาพ</h3>
+<p>สำหรับบริเวณ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mo>×</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">2\times2</annotation></semantics></math></span>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>P</mi><mo stretchy="false">[</mo><mi>i</mi><mo separator="true">,</mo><mi>j</mi><mo stretchy="false">]</mo><mo>=</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mrow><mi>u</mi><mo separator="true">,</mo><mi>v</mi><mo>∈</mo><mo stretchy="false">{</mo><mn>0</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">}</mo></mrow></munder><mi>A</mi><mo stretchy="false">[</mo><mn>2</mn><mi>i</mi><mo>+</mo><mi>u</mi><mo separator="true">,</mo><mn>2</mn><mi>j</mi><mo>+</mo><mi>v</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">P[i,j]
+=
+\max_{u,v\in\{0,1\}}
+A[2i+u,2j+v]</annotation></semantics></math></span></div>
+<p>โค้ดเรามีสาม convolution blocks:</p>
+<div class="table-scroll" tabindex="0" aria-label="ตาราง เลื่อนแนวนอนได้"><table>
+<thead>
+<tr>
+<th>ตำแหน่ง</th>
+<th>ขนาดต่อภาพหลัง block</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>อินพุต</td>
+<td><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>×</mo><mn>129</mn><mo>×</mo><mn>29</mn></mrow><annotation encoding="application/x-tex">1\times129\times29</annotation></semantics></math></span></td>
+</tr>
+<tr>
+<td>Block 1</td>
+<td><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>32</mn><mo>×</mo><mn>64</mn><mo>×</mo><mn>14</mn></mrow><annotation encoding="application/x-tex">32\times64\times14</annotation></semantics></math></span></td>
+</tr>
+<tr>
+<td>Block 2</td>
+<td><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>64</mn><mo>×</mo><mn>32</mn><mo>×</mo><mn>7</mn></mrow><annotation encoding="application/x-tex">64\times32\times7</annotation></semantics></math></span></td>
+</tr>
+<tr>
+<td>Block 3</td>
+<td><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>128</mn><mo>×</mo><mn>16</mn><mo>×</mo><mn>3</mn></mrow><annotation encoding="application/x-tex">128\times16\times3</annotation></semantics></math></span></td>
+</tr>
+</tbody>
+</table></div>
+<p>แต่ละ block มี convolution, BatchNorm, ReLU และ pooling</p>
+<h3>12.5 Global average pooling ย่อแต่ละ feature map</h3>
+<p>หลัง block สุดท้าย แต่ละช่องมีขนาด <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>16</mn><mo>×</mo><mn>3</mn></mrow><annotation encoding="application/x-tex">16\times3</annotation></semantics></math></span> เราเฉลี่ยพื้นที่:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>v</mi><mi>c</mi></msub><mo>=</mo><mfrac><mn>1</mn><mrow><mn>16</mn><mo>⋅</mo><mn>3</mn></mrow></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mn>16</mn></munderover><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mn>3</mn></munderover><msub><mi>A</mi><mi>c</mi></msub><mo stretchy="false">[</mo><mi>i</mi><mo separator="true">,</mo><mi>j</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">v_c
+=
+\frac{1}{16\cdot3}
+\sum_{i=1}^{16}\sum_{j=1}^{3}A_c[i,j]</annotation></semantics></math></span></div>
+<p>จึงได้เวกเตอร์ 128 ค่า</p>
+<p>จากนั้นผ่าน dropout และชั้น linear <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>128</mn><mo>→</mo><mn>128</mn></mrow><annotation encoding="application/x-tex">128\rightarrow128</annotation></semantics></math></span> พร้อม ReLU กลายเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">e</mi><mi>t</mi></msub><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mn>128</mn></msup></mrow><annotation encoding="application/x-tex">\mathbf e_t\in\mathbb R^{128}</annotation></semantics></math></span></div>
+<p>เวกเตอร์นี้คือ embedding ของ EEG epoch ที่ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span></p>
+<p><strong>128 ค่านี้เป็นคุณลักษณะที่โมเดลเรียนรู้ ไม่ใช่ 128 ความถี่ และไม่ใช่ 128 ระยะการนอน</strong></p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-13" class="chapter markdown-cell"><h2>13. BatchNorm กับ normalization ก่อนเข้าโมเดลไม่เหมือนกัน</h2>
+<p>BatchNorm อยู่ภายใน CNN และปรับ <strong>activations ของแต่ละ feature channel</strong></p>
+<p>รูปแบบคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">BN</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><mi>γ</mi><mfrac><mrow><mi>a</mi><mo>−</mo><msub><mi>μ</mi><mi>B</mi></msub></mrow><msqrt><mrow><msubsup><mi>σ</mi><mi>B</mi><mn>2</mn></msubsup><mo>+</mo><msub><mi>ϵ</mi><mi>B</mi></msub></mrow></msqrt></mfrac><mo>+</mo><mi>β</mi></mrow><annotation encoding="application/x-tex">\operatorname{BN}(a)
+=
+\gamma
+\frac{a-\mu_B}
+{\sqrt{\sigma_B^2+\epsilon_B}}
++\beta</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>μ</mi><mi>B</mi></msub><mo separator="true">,</mo><msubsup><mi>σ</mi><mi>B</mi><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">\mu_B,\sigma_B^2</annotation></semantics></math></span>: สถิติของ activations ใน batch</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>γ</mi><mo separator="true">,</mo><mi>β</mi></mrow><annotation encoding="application/x-tex">\gamma,\beta</annotation></semantics></math></span>: พารามิเตอร์ที่เรียนรู้ได้</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ϵ</mi><mi>B</mi></msub></mrow><annotation encoding="application/x-tex">\epsilon_B</annotation></semantics></math></span>: ค่าป้องกันความไม่เสถียรในการหาร</li>
+</ul>
+<p>สำหรับ BatchNorm2d สถิติคำนวณข้ามแกน batch และพื้นที่ของ feature map โดยแยกตาม channel</p>
+<h3>ตอน train</h3>
+<p>ใช้สถิติของ batch และอัปเดต running statistics เช่น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>μ</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">n</mi><mo separator="true">,</mo><mi mathvariant="normal">n</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">w</mi></mrow></msub><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>m</mi><mo stretchy="false">)</mo><msub><mi>μ</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">n</mi><mo separator="true">,</mo><mi mathvariant="normal">o</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">d</mi></mrow></msub><mo>+</mo><mi>m</mi><msub><mi>μ</mi><mi>B</mi></msub></mrow><annotation encoding="application/x-tex">\mu_{\mathrm{run,new}}
+=
+(1-m)\mu_{\mathrm{run,old}}
++m\mu_B</annotation></semantics></math></span></div>
+<h3>ตอน eval</h3>
+<p>ใช้ running statistics ที่เก็บไว้ ไม่ใช่คำนวณใหม่จาก test batch ตาม config ปกติที่เราใช้ <a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.BatchNorm2d.html">รายละเอียด BatchNorm2d จาก PyTorch</a></p>
+<p>ต้องแยกสองชั้นนี้:</p>
+<ul>
+<li><strong>Per-night normalization:</strong> ปรับฟีเจอร์ STFT ก่อนเข้าโมเดล แยกตามความถี่</li>
+<li><strong>BatchNorm:</strong> ปรับ activations ภายใน CNN แยกตาม feature channel</li>
+</ul>
+<p>การเปลี่ยน R1 จึงไม่ได้เท่ากับเปลี่ยนกฎ BatchNorm</p>
+<h3>Dropout ต่างออกไปอีก</h3>
+<p>Dropout ของเรามี <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.3</mn></mrow><annotation encoding="application/x-tex">p=0.3</annotation></semantics></math></span></p>
+<p>ระหว่าง train รูปแบบทั่วไปคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>a</mi><mo stretchy="true">~</mo></mover><mi>i</mi></msub><mo>=</mo><mfrac><msub><mi>m</mi><mi>i</mi></msub><mrow><mn>1</mn><mo>−</mo><mi>p</mi></mrow></mfrac><msub><mi>a</mi><mi>i</mi></msub><mo separator="true">,</mo><mspace width="2em"/><msub><mi>m</mi><mi>i</mi></msub><mo>∼</mo><mi mathvariant="normal">Bernoulli</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\widetilde a_i
+=
+\frac{m_i}{1-p}a_i,
+\qquad
+m_i\sim\operatorname{Bernoulli}(1-p)</annotation></semantics></math></span></div>
+<p>บาง activations ถูกตั้งเป็นศูนย์ และส่วนที่เหลือถูกปรับสเกลเพื่อรักษาค่าคาดหมาย</p>
+<p>ตอน eval dropout ถูกปิด</p>
+<p>นี่ทำให้ <code>model.train()</code> กับ <code>model.eval()</code> ไม่ได้เป็นเพียงชื่อโหมด แต่มีผลต่อการคำนวณจริง</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-14" class="chapter markdown-cell"><h2>14. GRU อ่านลำดับด้วยสมการอย่างไร?</h2>
+<p>หลัง CNN เรามี:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">e</mi><mn>1</mn></msub><mo separator="true">,</mo><msub><mi mathvariant="bold">e</mi><mn>2</mn></msub><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msub><mi mathvariant="bold">e</mi><mn>20</mn></msub></mrow><annotation encoding="application/x-tex">\mathbf e_1,\mathbf e_2,\ldots,\mathbf e_{20}</annotation></semantics></math></span></div>
+<p>GRU อ่าน embedding ตามลำดับ และสร้าง <strong>hidden state</strong> ซึ่งเป็นเวกเตอร์สรุปบริบท</p>
+<h3>เริ่มจาก RNN ธรรมดา</h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo>=</mo><mi>tanh</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>W</mi><msub><mi mathvariant="bold">e</mi><mi>t</mi></msub><mo>+</mo><mi>U</mi><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><mi mathvariant="bold">b</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathbf h_t
+=
+\tanh(W\mathbf e_t+U\mathbf h_{t-1}+\mathbf b)</annotation></semantics></math></span></div>
+<p>สถานะใหม่ขึ้นกับทั้งข้อมูลปัจจุบันและสถานะก่อนหน้า</p>
+<p>ปัญหาคือ gradient ต้องเดินย้อนผ่านหลายเวลา โดยเกี่ยวข้องกับการคูณ Jacobian ต่อเนื่อง:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub></mrow><mrow><mi mathvariant="normal">∂</mi><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mi>k</mi></mrow></msub></mrow></mfrac><mo>=</mo><msub><mi>J</mi><mi>t</mi></msub><msub><mi>J</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>⋯</mo><msub><mi>J</mi><mrow><mi>t</mi><mo>−</mo><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\frac{\partial\mathbf h_t}{\partial\mathbf h_{t-k}}
+=
+J_tJ_{t-1}\cdots J_{t-k+1}</annotation></semantics></math></span></div>
+<p>ถ้าผลคูณมีขนาดเล็กลงมาก gradient อาจหายไป เรียกว่า <strong>vanishing gradient</strong> ถ้าโตมากอาจเป็น <strong>exploding gradient</strong></p>
+<h3>GRU เพิ่ม gates</h3>
+<p>Sigmoid คือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>σ</mi><mo stretchy="false">(</mo><mi>a</mi><mo stretchy="false">)</mo><mo>=</mo><mfrac><mn>1</mn><mrow><mn>1</mn><mo>+</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>a</mi></mrow></msup></mrow></mfrac></mrow><annotation encoding="application/x-tex">\sigma(a)=\frac{1}{1+e^{-a}}</annotation></semantics></math></span></div>
+<p>ให้ค่าระหว่าง 0 กับ 1 จึงใช้เป็นตัวควบคุมสัดส่วนได้</p>
+<p>สมการตามรูปแบบของ PyTorch ที่เราใช้คือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">r</mi><mi>t</mi></msub><mo>=</mo><mi>σ</mi><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>i</mi><mi>r</mi></mrow></msub><msub><mi mathvariant="bold">e</mi><mi>t</mi></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>i</mi><mi>r</mi></mrow></msub><mo>+</mo><msub><mi>W</mi><mrow><mi>h</mi><mi>r</mi></mrow></msub><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>h</mi><mi>r</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathbf r_t
+=
+\sigma(
+W_{ir}\mathbf e_t+\mathbf b_{ir}
++
+W_{hr}\mathbf h_{t-1}+\mathbf b_{hr}
+)</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">z</mi><mi>t</mi></msub><mo>=</mo><mi>σ</mi><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>i</mi><mi>z</mi></mrow></msub><msub><mi mathvariant="bold">e</mi><mi>t</mi></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>i</mi><mi>z</mi></mrow></msub><mo>+</mo><msub><mi>W</mi><mrow><mi>h</mi><mi>z</mi></mrow></msub><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>h</mi><mi>z</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathbf z_t
+=
+\sigma(
+W_{iz}\mathbf e_t+\mathbf b_{iz}
++
+W_{hz}\mathbf h_{t-1}+\mathbf b_{hz}
+)</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">n</mi><mi>t</mi></msub><mo>=</mo><mi>tanh</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><msub><mi>W</mi><mrow><mi>i</mi><mi>n</mi></mrow></msub><msub><mi mathvariant="bold">e</mi><mi>t</mi></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>i</mi><mi>n</mi></mrow></msub><mo>+</mo><msub><mi mathvariant="bold">r</mi><mi>t</mi></msub><mo>⊙</mo><mo stretchy="false">(</mo><msub><mi>W</mi><mrow><mi>h</mi><mi>n</mi></mrow></msub><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mrow><mi>h</mi><mi>n</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">\mathbf n_t
+=
+\tanh\left(
+W_{in}\mathbf e_t+\mathbf b_{in}
++
+\mathbf r_t\odot
+(W_{hn}\mathbf h_{t-1}+\mathbf b_{hn})
+\right)</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi mathvariant="bold">z</mi><mi>t</mi></msub><mo stretchy="false">)</mo><mo>⊙</mo><msub><mi mathvariant="bold">n</mi><mi>t</mi></msub><mo>+</mo><msub><mi mathvariant="bold">z</mi><mi>t</mi></msub><mo>⊙</mo><msub><mi mathvariant="bold">h</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\mathbf h_t
+=
+(1-\mathbf z_t)\odot\mathbf n_t
++
+\mathbf z_t\odot\mathbf h_{t-1}</annotation></semantics></math></span></div>
+<p>สัญลักษณ์ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>⊙</mo></mrow><annotation encoding="application/x-tex">\odot</annotation></semantics></math></span> คือคูณสมาชิกตำแหน่งเดียวกัน</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="bold">r</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\mathbf r_t</annotation></semantics></math></span>: reset gate ควบคุมอิทธิพลของสถานะเก่าในการสร้าง candidate</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="bold">z</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\mathbf z_t</annotation></semantics></math></span>: update gate ควบคุมส่วนที่เก็บสถานะเก่าไว้</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="bold">n</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\mathbf n_t</annotation></semantics></math></span>: candidate state ใหม่</li>
+</ul>
+<p>ใน convention นี้ ถ้า <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">z_t</annotation></semantics></math></span> ใกล้ 1 จะเก็บสถานะเก่าไว้มาก ถ้าใกล้ 0 จะใช้ candidate ใหม่มาก <a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.GRU.html">สมการ GRU ของ PyTorch</a></p>
+<p>Gates ช่วยให้มีทางเก็บบริบทได้ยืดหยุ่นขึ้น แต่ไม่ได้รับประกันว่าจะไม่มีปัญหา gradient หรือจำบริบทได้สมบูรณ์</p>
+<h3>BiGRU อ่านสองทิศทาง</h3>
+<p>เรามีสถานะ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo stretchy="true">→</mo></mover></mrow><annotation encoding="application/x-tex">\overrightarrow{\mathbf h_t}</annotation></semantics></math></span></div>
+<p>จากการอ่านไปข้างหน้า และ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo stretchy="true">←</mo></mover></mrow><annotation encoding="application/x-tex">\overleftarrow{\mathbf h_t}</annotation></semantics></math></span></div>
+<p>จากการอ่านย้อนกลับ แล้วนำมาต่อกัน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo>=</mo><mo stretchy="false">[</mo><mover accent="true"><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo stretchy="true">→</mo></mover><mo separator="true">;</mo><mover accent="true"><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo stretchy="true">←</mo></mover><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">\mathbf h_t
+=
+[
+\overrightarrow{\mathbf h_t};
+\overleftarrow{\mathbf h_t}
+]</annotation></semantics></math></span></div>
+<p>hidden size ต่อทิศทางคือ 128 จึงได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mn>128</mn><mo>+</mo><mn>128</mn><mo>=</mo><mn>256</mn></mrow><annotation encoding="application/x-tex">128+128=256</annotation></semantics></math></span></div>
+<p>โมเดลเรามี GRU สองชั้น</p>
+<p>อย่างไรก็ตาม <strong>มันประมวลผลทีละหน้าต่าง 20 epochs ไม่ได้มีความจำต่อเนื่องครอบคลุมทั้งคืนโดยอัตโนมัติ</strong> โค้ดเรียก GRU ใหม่ในแต่ละ sequence และใช้บริบทภายใน sequence นั้น</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-15" class="chapter markdown-cell"><h2>15. หัวจำแนกเปลี่ยน hidden state เป็นคำทายอย่างไร?</h2>
+<p>หัวจำแนกเป็นชั้น linear:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">a</mi><mi>t</mi></msub><mo>=</mo><msub><mi>W</mi><mi>o</mi></msub><msub><mi mathvariant="bold">h</mi><mi>t</mi></msub><mo>+</mo><msub><mi mathvariant="bold">b</mi><mi>o</mi></msub></mrow><annotation encoding="application/x-tex">\mathbf a_t
+=
+W_o\mathbf h_t+\mathbf b_o</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>W</mi><mi>o</mi></msub><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mrow><mn>5</mn><mo>×</mo><mn>256</mn></mrow></msup></mrow><annotation encoding="application/x-tex">W_o\in\mathbb R^{5\times256}</annotation></semantics></math></span></div>
+<p>และ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi mathvariant="bold">a</mi><mi>t</mi></msub><mo>∈</mo><msup><mi mathvariant="double-struck">R</mi><mn>5</mn></msup></mrow><annotation encoding="application/x-tex">\mathbf a_t\in\mathbb R^5</annotation></semantics></math></span></div>
+<p>เวกเตอร์ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="bold">a</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\mathbf a_t</annotation></semantics></math></span> คือ <strong>logits</strong> ห้าค่า</p>
+<p>Logits:</p>
+<ul>
+<li>เป็นลบได้</li>
+<li>ไม่จำเป็นต้องรวมเป็น 1</li>
+<li>ยังไม่ใช่ probabilities โดยตรง</li>
+</ul>
+<p>ถ้าต้องการ probability ใช้ softmax:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>=</mo><mfrac><msup><mi>e</mi><msub><mi>a</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></msup><mrow><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mn>4</mn></munderover><msup><mi>e</mi><msub><mi>a</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>k</mi></mrow></msub></msup></mrow></mfrac></mrow><annotation encoding="application/x-tex">p_{t,c}
+=
+\frac{e^{a_{t,c}}}
+{\sum_{k=0}^{4}e^{a_{t,k}}}</annotation></semantics></math></span></div>
+<p>ทำให้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>&gt;</mo><mn>0</mn><mo separator="true">,</mo><mspace width="2em"/><munder><mo>∑</mo><mi>c</mi></munder><msub><mi>p</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">p_{t,c}&gt;0,
+\qquad
+\sum_cp_{t,c}=1</annotation></semantics></math></span></div>
+<p>ตัวอย่างสมมติ ถ้า logit ของ N2 เป็น <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mn>4</mn></mrow><annotation encoding="application/x-tex">\ln4</annotation></semantics></math></span> และอีกสี่คลาสเป็น 0:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mrow><mi mathvariant="normal">N</mi><mn>2</mn></mrow></msub><mo>=</mo><mfrac><mn>4</mn><mrow><mn>4</mn><mo>+</mo><mn>1</mn><mo>+</mo><mn>1</mn><mo>+</mo><mn>1</mn><mo>+</mo><mn>1</mn></mrow></mfrac><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">p_{\mathrm{N2}}
+=
+\frac{4}{4+1+1+1+1}
+=0.5</annotation></semantics></math></span></div>
+<p>อีกแต่ละคลาสมี probability <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.125</mn></mrow><annotation encoding="application/x-tex">0.125</annotation></semantics></math></span></p>
+<p>คำทายคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>y</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>c</mi></munder><msub><mi>a</mi><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\widehat y_t=\arg\max_ca_{t,c}</annotation></semantics></math></span></div>
+<p>เลือกคลาสที่ logit สูงสุด ซึ่งตรงกับคลาสที่ softmax สูงสุด</p>
+<p>แต่ probability ที่โมเดลให้ เช่น 0.9 ไม่ได้พิสูจน์ว่าเหตุการณ์นั้นจะถูกต้องจริง 90% เสมอ ต้องตรวจ calibration แยกต่างหาก</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-16" class="chapter markdown-cell"><h2>16. Loss บอกโมเดลว่าผิดอย่างไร?</h2>
+<p>เราใช้ <strong>Cross-Entropy Loss</strong></p>
+<p>สำหรับตัวอย่างหนึ่งที่มีคลาสจริง <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">ℓ</mi><mo>=</mo><mo>−</mo><mi>ln</mi><mo>⁡</mo><msub><mi>p</mi><mi>y</mi></msub></mrow><annotation encoding="application/x-tex">\ell=-\ln p_y</annotation></semantics></math></span></div>
+<p>มันสนใจ probability ที่โมเดลให้แก่คำตอบจริง</p>
+<p>ตัวอย่าง:</p>
+<div class="table-scroll" tabindex="0" aria-label="ตาราง เลื่อนแนวนอนได้"><table>
+<thead>
+<tr>
+<th style="text-align:right">Probability ของคลาสจริง</th>
+<th style="text-align:right">Loss โดยประมาณ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">0.9</td>
+<td style="text-align:right">0.105</td>
+</tr>
+<tr>
+<td style="text-align:right">0.5</td>
+<td style="text-align:right">0.693</td>
+</tr>
+<tr>
+<td style="text-align:right">0.1</td>
+<td style="text-align:right">2.303</td>
+</tr>
+<tr>
+<td style="text-align:right">0.01</td>
+<td style="text-align:right">4.605</td>
+</tr>
+</tbody>
+</table></div>
+<p>ถ้าให้ probability แก่คำตอบจริงต่ำมาก loss จะสูงมาก</p>
+<p>ด้วย softmax สามารถเขียนเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">ℓ</mi><mo>=</mo><mo>−</mo><msub><mi>a</mi><mi>y</mi></msub><mo>+</mo><mi>ln</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><munder><mo>∑</mo><mi>c</mi></munder><msup><mi>e</mi><msub><mi>a</mi><mi>c</mi></msub></msup><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">\ell
+=
+-a_y+\ln\left(\sum_ce^{a_c}\right)</annotation></semantics></math></span></div>
+<p>ไลบรารีคำนวณจาก logits โดยตรงเพื่อความเสถียร จึงไม่ต้องคำนวณ softmax แล้วนำไป log เองก่อนส่งเข้า <code>CrossEntropyLoss</code></p>
+<h3>Class weights ของเรา</h3>
+<p>config ฐานใช้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><msub><mi>w</mi><mi>W</mi></msub><mo separator="true">,</mo><msub><mi>w</mi><mrow><mi>N</mi><mn>1</mn></mrow></msub><mo separator="true">,</mo><msub><mi>w</mi><mrow><mi>N</mi><mn>2</mn></mrow></msub><mo separator="true">,</mo><msub><mi>w</mi><mrow><mi>N</mi><mn>3</mn></mrow></msub><mo separator="true">,</mo><msub><mi>w</mi><mrow><mi mathvariant="normal">R</mi><mi mathvariant="normal">E</mi><mi mathvariant="normal">M</mi></mrow></msub><mo stretchy="false">]</mo><mo>=</mo><mo stretchy="false">[</mo><mn>1</mn><mo separator="true">,</mo><mn>1.5</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[w_W,w_{N1},w_{N2},w_{N3},w_{\mathrm{REM}}]
+=
+[1,1.5,1,1,1]</annotation></semantics></math></span></div>
+<p>คือให้น้ำหนัก N1 มากกว่าคลาสอื่น</p>
+<p>สำหรับ integer labels และ weighted mean ของ PyTorch:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="script">L</mi><mo>=</mo><mfrac><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover><msub><mi>w</mi><msub><mi>y</mi><mi>i</mi></msub></msub><mo stretchy="false">(</mo><mo>−</mo><mi>ln</mi><mo>⁡</mo><msub><mi>p</mi><mrow><mi>i</mi><mo separator="true">,</mo><msub><mi>y</mi><mi>i</mi></msub></mrow></msub><mo stretchy="false">)</mo></mrow><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover><msub><mi>w</mi><msub><mi>y</mi><mi>i</mi></msub></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">\mathcal L
+=
+\frac{
+\sum_{i=1}^{N}w_{y_i}(-\ln p_{i,y_i})
+}{
+\sum_{i=1}^{N}w_{y_i}
+}</annotation></semantics></math></span></div>
+<p>ตัวหารเป็นผลรวมของ weights ของตัวอย่างที่ใช้ ไม่ใช่หารด้วย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>N</mi></mrow><annotation encoding="application/x-tex">N</annotation></semantics></math></span> เสมอ <a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html">นิยาม CrossEntropyLoss ของ PyTorch</a></p>
+<h3>หนึ่ง sequence ไม่ได้มีคำตอบเดียว</h3>
+<p>โมเดลสร้าง logits:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mi>B</mi><mo separator="true">,</mo><mi>S</mi><mo separator="true">,</mo><mn>5</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[B,S,5]</annotation></semantics></math></span></div>
+<p>และ labels:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mi>B</mi><mo separator="true">,</mo><mi>S</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[B,S]</annotation></semantics></math></span></div>
+<p>โค้ดจัดเป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mi>B</mi><mi>S</mi><mo separator="true">,</mo><mn>5</mn><mo stretchy="false">]</mo><mspace width="1em"/><mtext>และ</mtext><mspace width="1em"/><mo stretchy="false">[</mo><mi>B</mi><mi>S</mi><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[BS,5]
+\quad\text{และ}\quad
+[BS]</annotation></semantics></math></span></div>
+<p>ก่อนคำนวณ loss</p>
+<p>ดังนั้นทุก EEG epoch ใน sequence มีคำตอบและมีส่วนใน loss ของตัวเอง ไม่ได้ให้ป้ายเดียวกับ EEG ทั้ง 10 นาที</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-17" class="chapter markdown-cell"><h2>17. Gradient ทำให้น้ำหนักเรียนรู้ได้อย่างไร?</h2>
+<p>อนุพันธ์บอกว่า:</p>
+<blockquote>
+<p>ถ้าเปลี่ยนตัวแปรนี้เล็กน้อย ผลลัพธ์จะเปลี่ยนอย่างไร?</p>
+</blockquote>
+<p>สำหรับ loss และ logits ของตัวอย่างหนึ่งที่ไม่มี class weight:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi></mrow><mrow><mi mathvariant="normal">∂</mi><msub><mi>a</mi><mi>c</mi></msub></mrow></mfrac><mo>=</mo><msub><mi>p</mi><mi>c</mi></msub><mo>−</mo><mn mathvariant="double-struck">1</mn><mo stretchy="false">(</mo><mi>c</mi><mo>=</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\frac{\partial\ell}{\partial a_c}
+=
+p_c-\mathbb 1(c=y)</annotation></semantics></math></span></div>
+<p><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn mathvariant="double-struck">1</mn><mo stretchy="false">(</mo><mi>c</mi><mo>=</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathbb 1(c=y)</annotation></semantics></math></span> เป็น 1 เมื่อ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span> คือคลาสจริง และเป็น 0 สำหรับคลาสอื่น</p>
+<p>ตัวอย่างสมมติ คลาสจริงเป็น N1 แต่โมเดลให้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>p</mi><mrow><mi>N</mi><mn>1</mn></mrow></msub><mo>=</mo><mn>0.2</mn><mo separator="true">,</mo><mspace width="2em"/><msub><mi>p</mi><mrow><mi>N</mi><mn>2</mn></mrow></msub><mo>=</mo><mn>0.6</mn></mrow><annotation encoding="application/x-tex">p_{N1}=0.2,
+\qquad
+p_{N2}=0.6</annotation></semantics></math></span></div>
+<p>จะได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi></mrow><mrow><mi mathvariant="normal">∂</mi><msub><mi>a</mi><mrow><mi>N</mi><mn>1</mn></mrow></msub></mrow></mfrac><mo>=</mo><mn>0.2</mn><mo>−</mo><mn>1</mn><mo>=</mo><mo>−</mo><mn>0.8</mn></mrow><annotation encoding="application/x-tex">\frac{\partial\ell}{\partial a_{N1}}
+=
+0.2-1=-0.8</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="normal">ℓ</mi></mrow><mrow><mi mathvariant="normal">∂</mi><msub><mi>a</mi><mrow><mi>N</mi><mn>2</mn></mrow></msub></mrow></mfrac><mo>=</mo><mn>0.6</mn><mo>−</mo><mn>0</mn><mo>=</mo><mn>0.6</mn></mrow><annotation encoding="application/x-tex">\frac{\partial\ell}{\partial a_{N2}}
+=
+0.6-0=0.6</annotation></semantics></math></span></div>
+<p>ถ้าปรับ logits ตามทิศลด loss:</p>
+<ul>
+<li>คะแนน N1 ควรเพิ่ม</li>
+<li>คะแนน N2 ควรลด</li>
+</ul>
+<p>สำหรับ weighted mean:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="script">L</mi></mrow><mrow><mi mathvariant="normal">∂</mi><msub><mi>a</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></mrow></mfrac><mo>=</mo><mfrac><msub><mi>w</mi><msub><mi>y</mi><mi>i</mi></msub></msub><mrow><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>w</mi><msub><mi>y</mi><mi>j</mi></msub></msub></mrow></mfrac><mrow><mo fence="true">[</mo><msub><mi>p</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo>−</mo><mn mathvariant="double-struck">1</mn><mo stretchy="false">(</mo><mi>c</mi><mo>=</mo><msub><mi>y</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">\frac{\partial\mathcal L}{\partial a_{i,c}}
+=
+\frac{w_{y_i}}{\sum_jw_{y_j}}
+\left[p_{i,c}-\mathbb 1(c=y_i)\right]</annotation></semantics></math></span></div>
+<p>แล้วใช้ <strong>chain rule</strong> ส่ง gradient ย้อนกลับไปยังน้ำหนัก:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="script">L</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>θ</mi></mrow></mfrac><mo>=</mo><mfrac><mrow><mi mathvariant="normal">∂</mi><mi mathvariant="script">L</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>a</mi></mrow></mfrac><mfrac><mrow><mi mathvariant="normal">∂</mi><mi>a</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>h</mi></mrow></mfrac><mfrac><mrow><mi mathvariant="normal">∂</mi><mi>h</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>e</mi></mrow></mfrac><mfrac><mrow><mi mathvariant="normal">∂</mi><mi>e</mi></mrow><mrow><mi mathvariant="normal">∂</mi><mi>θ</mi></mrow></mfrac></mrow><annotation encoding="application/x-tex">\frac{\partial\mathcal L}{\partial\theta}
+=
+\frac{\partial\mathcal L}{\partial a}
+\frac{\partial a}{\partial h}
+\frac{\partial h}{\partial e}
+\frac{\partial e}{\partial\theta}</annotation></semantics></math></span></div>
+<p>ในระบบจริงมีหลายเส้นทางและหลายตัวแปร แต่แนวคิดคือคำนวณว่าพารามิเตอร์แต่ละตัวมีส่วนทำให้ loss เปลี่ยนเท่าไร</p>
+<p><strong>Backpropagation คือการคำนวณ gradient ส่วน optimizer คือวิธีนำ gradient ไปปรับน้ำหนัก เป็นคนละขั้นตอนกัน</strong></p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-18" class="chapter markdown-cell"><h2>18. AdamW, learning rate และ gradient clipping</h2>
+<p>ถ้าใช้ gradient descent ธรรมดา:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>θ</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>θ</mi><mi>t</mi></msub><mo>−</mo><mi>α</mi><msub><mi>g</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\theta_{t+1}
+=
+\theta_t-\alpha g_t</annotation></semantics></math></span></div>
+<p>โดย:</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>t</mi></msub><mo>=</mo><msub><mi mathvariant="normal">∇</mi><mi>θ</mi></msub><mi mathvariant="script">L</mi></mrow><annotation encoding="application/x-tex">g_t=\nabla_\theta\mathcal L</annotation></semantics></math></span></li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span>: learning rate</li>
+</ul>
+<p>แต่โค้ดเราใช้ AdamW</p>
+<p>มันเก็บค่าเฉลี่ยเคลื่อนที่ของ gradient:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>m</mi><mi>t</mi></msub><mo>=</mo><msub><mi>β</mi><mn>1</mn></msub><msub><mi>m</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi>β</mi><mn>1</mn></msub><mo stretchy="false">)</mo><msub><mi>g</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">m_t=\beta_1m_{t-1}+(1-\beta_1)g_t</annotation></semantics></math></span></div>
+<p>และ gradient กำลังสอง:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>v</mi><mi>t</mi></msub><mo>=</mo><msub><mi>β</mi><mn>2</mn></msub><msub><mi>v</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><msub><mi>β</mi><mn>2</mn></msub><mo stretchy="false">)</mo><msubsup><mi>g</mi><mi>t</mi><mn>2</mn></msubsup></mrow><annotation encoding="application/x-tex">v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2</annotation></semantics></math></span></div>
+<p>จากนั้นแก้ bias ช่วงเริ่มต้น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>m</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo>=</mo><mfrac><msub><mi>m</mi><mi>t</mi></msub><mrow><mn>1</mn><mo>−</mo><msubsup><mi>β</mi><mn>1</mn><mi>t</mi></msubsup></mrow></mfrac></mrow><annotation encoding="application/x-tex">\widehat m_t=\frac{m_t}{1-\beta_1^t}</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>v</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo>=</mo><mfrac><msub><mi>v</mi><mi>t</mi></msub><mrow><mn>1</mn><mo>−</mo><msubsup><mi>β</mi><mn>2</mn><mi>t</mi></msubsup></mrow></mfrac></mrow><annotation encoding="application/x-tex">\widehat v_t=\frac{v_t}{1-\beta_2^t}</annotation></semantics></math></span></div>
+<p>รูปแบบการอัปเดตคือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>θ</mi><mi>t</mi></msub><mo>=</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>α</mi><mi>λ</mi><mo stretchy="false">)</mo><msub><mi>θ</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>−</mo><mi>α</mi><mfrac><msub><mover accent="true"><mi>m</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mrow><msqrt><msub><mover accent="true"><mi>v</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub></msqrt><mo>+</mo><mi>ϵ</mi></mrow></mfrac></mrow><annotation encoding="application/x-tex">\theta_t
+=
+(1-\alpha\lambda)\theta_{t-1}
+-
+\alpha
+\frac{\widehat m_t}
+{\sqrt{\widehat v_t}+\epsilon}</annotation></semantics></math></span></div>
+<p>โดยคำนวณสมาชิกต่อสมาชิก</p>
+<ul>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">m_t</annotation></semantics></math></span>: ช่วยสรุปทิศทาง gradient</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>v</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">v_t</annotation></semantics></math></span>: ช่วยปรับขนาดการอัปเดตตามประวัติ gradient</li>
+<li><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi></mrow><annotation encoding="application/x-tex">\lambda</annotation></semantics></math></span>: weight decay ซึ่งค่อย ๆ ลดขนาดพารามิเตอร์</li>
+</ul>
+<p>ของเราเริ่มด้วย:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>α</mi><mo>=</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>3</mn></mrow></msup><mo separator="true">,</mo><mspace width="2em"/><mi>λ</mi><mo>=</mo><msup><mn>10</mn><mrow><mo>−</mo><mn>4</mn></mrow></msup></mrow><annotation encoding="application/x-tex">\alpha=10^{-3},
+\qquad
+\lambda=10^{-4}</annotation></semantics></math></span></div>
+<p>AdamW แยก weight decay ออกจากการสะสม moments ของ gradient <a href="https://docs.pytorch.org/docs/2.14/generated/torch.optim.AdamW.html">หลักการ AdamW จาก PyTorch</a></p>
+<h3>Gradient clipping</h3>
+<p>ของเรา clip gradient norm ที่ประมาณ 1:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>g</mi><mrow><mi mathvariant="normal">c</mi><mi mathvariant="normal">l</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">p</mi></mrow></msub><mo>=</mo><mi>g</mi><mo>⋅</mo><mi>min</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mn>1</mn><mo separator="true">,</mo><mfrac><mn>1</mn><mrow><mi mathvariant="normal">∥</mi><mi>g</mi><msub><mi mathvariant="normal">∥</mi><mn>2</mn></msub></mrow></mfrac><mo fence="true">)</mo></mrow></mrow><annotation encoding="application/x-tex">g_{\mathrm{clip}}
+=
+g\cdot
+\min\left(1,\frac{1}{\|g\|_2}\right)</annotation></semantics></math></span></div>
+<p>ถ้า gradient norm ใหญ่เกินไป จะลดขนาดทั้งเวกเตอร์ โดยรักษาทิศทางไว้ในหลักการนี้</p>
+<p>มันช่วยป้องกันการอัปเดตที่รุนแรงบางครั้ง แต่ไม่ได้แก้ทุกสาเหตุของ training instability</p>
+<h3>ทำไมการฝึกใช้หน่วยความจำมากกว่าการทำนาย?</h3>
+<p>ตอนฝึกต้องเก็บ activations เพื่อคำนวณ gradient ย้อนกลับ และ AdamW ยังเก็บ moments ของพารามิเตอร์ด้วย</p>
+<p>ดังนั้นหน่วยความจำไม่ใช่แค่ขนาดไฟล์โมเดล แต่มีองค์ประกอบประมาณ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>M</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msub><mo>=</mo><msub><mi>M</mi><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">s</mi></mrow></msub><mo>+</mo><msub><mi>M</mi><mrow><mi mathvariant="normal">g</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">d</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">s</mi></mrow></msub><mo>+</mo><msub><mi>M</mi><mrow><mi mathvariant="normal">o</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">z</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">r</mi></mrow></msub><mo>+</mo><msub><mi>M</mi><mrow><mi mathvariant="normal">a</mi><mi mathvariant="normal">c</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">v</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">s</mi></mrow></msub><mo>+</mo><msub><mi>M</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">m</mi><mi mathvariant="normal">p</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">y</mi></mrow></msub></mrow><annotation encoding="application/x-tex">M_{\mathrm{train}}
+=
+M_{\mathrm{parameters}}
++
+M_{\mathrm{gradients}}
++
+M_{\mathrm{optimizer}}
++
+M_{\mathrm{activations}}
++
+M_{\mathrm{temporary}}</annotation></semantics></math></span></div>
+<p>การลด batch ช่วยลด activations แต่มีผลต่อ gradient และสถิติ BatchNorm ด้วย จึงไม่ใช่การเปลี่ยนทรัพยากรที่ไม่มีผลต่อพฤติกรรมการฝึกเลย</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-19" class="chapter markdown-cell"><h2>19. ทำไม loss ต่ำยังไม่พอ?</h2>
+<p>เป้าหมายเชิงคณิตศาสตร์ของการฝึกคือทำ empirical risk ให้ต่ำ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>R</mi><mo stretchy="true">^</mo></mover><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msub><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><mfrac><mn>1</mn><mi>N</mi></mfrac><munder><mo>∑</mo><mi>i</mi></munder><mi mathvariant="normal">ℓ</mi><mo stretchy="false">(</mo><msub><mi>f</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>X</mi><mi>i</mi></msub><mo stretchy="false">)</mo><mo separator="true">,</mo><msub><mi>y</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\widehat R_{\mathrm{train}}(\theta)
+=
+\frac{1}{N}
+\sum_i
+\ell(f_\theta(X_i),y_i)</annotation></semantics></math></span></div>
+<p>แต่สิ่งที่เราต้องการจริงคือทำงานได้กับข้อมูลใหม่:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>R</mi><mo stretchy="false">(</mo><mi>θ</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mi mathvariant="double-struck">E</mi><mrow><mo stretchy="false">(</mo><mi>X</mi><mo separator="true">,</mo><mi>Y</mi><mo stretchy="false">)</mo><mo>∼</mo><mi>P</mi></mrow></msub><mo stretchy="false">[</mo><mi mathvariant="normal">ℓ</mi><mo stretchy="false">(</mo><msub><mi>f</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>X</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>Y</mi><mo stretchy="false">)</mo><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">R(\theta)
+=
+\mathbb E_{(X,Y)\sim P}
+[\ell(f_\theta(X),Y)]</annotation></semantics></math></span></div>
+<p><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span> คือการกระจายข้อมูลของประชากรหรือสถานการณ์ที่สนใจ</p>
+<p>สองปริมาณนี้ไม่จำเป็นต้องเท่ากัน</p>
+<p>โมเดลอาจจำคุณลักษณะของคนฝึก จึงมี train loss ต่ำ แต่พลาดกับคนใหม่ นี่คือหนึ่งรูปแบบของ <strong>overfitting</strong></p>
+<h3>ทำไมแบ่งตามคน?</h3>
+<p>EEG epochs ของคนเดียวกันมีความสัมพันธ์กัน ไม่ใช่ตัวอย่างอิสระทั้งหมด</p>
+<p>หากสุ่มช่วงจากคืนเดียวกันไปอยู่ทั้ง train และ test โมเดลอาจอาศัยลักษณะของคนหรือคืนที่เคยเห็น มากกว่าความสามารถทั่วไปในการจำแนกระยะการนอน</p>
+<p>เราใช้ subject-wise folds โดยภายในแต่ละ fold:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>S</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msub><mo>∩</mo><msub><mi>S</mi><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">S_{\mathrm{train}}\cap S_{\mathrm{val}}=\varnothing</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>S</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">r</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">n</mi></mrow></msub><mo>∩</mo><msub><mi>S</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">S_{\mathrm{train}}\cap S_{\mathrm{test}}=\varnothing</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>S</mi><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi></mrow></msub><mo>∩</mo><msub><mi>S</mi><mrow><mi mathvariant="normal">t</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">S_{\mathrm{val}}\cap S_{\mathrm{test}}=\varnothing</annotation></semantics></math></span></div>
+<p>ขนาดคือ 16/2/2 คน และทดสอบครบ 20 คนผ่าน 10 folds</p>
+<h3>Early stopping ใช้ validation</h3>
+<p>โค้ดเลือก checkpoint ที่ validation macro-F1 สูงที่สุด:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>t</mi><mo>∗</mo></msup><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>t</mi></munder><msub><mrow><mi mathvariant="normal">MF1</mi><mo>⁡</mo></mrow><mrow><mi mathvariant="normal">v</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">l</mi></mrow></msub><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">t^*=\arg\max_t\operatorname{MF1}_{\mathrm{val}}(t)</annotation></semantics></math></span></div>
+<p>หยุดเมื่อไม่ดีขึ้นติดต่อกันตาม patience ที่กำหนด ของเราเป็น 10 รอบ และจำกัดสูงสุด 60 รอบ</p>
+<p>learning-rate scheduler ลด LR เมื่อ validation score ไม่ดีขึ้นตามเงื่อนไขของมัน</p>
+<p>จุดละเอียดอีกอย่างคือ <strong>คะแนนที่ใช้เลือก checkpoint เป็น macro-F1 ของ validation ที่รวมสองคน ส่วนคะแนน headline สุดท้ายของเราเป็น mean subject macro-F1</strong> วิธีเฉลี่ยสองอย่างนี้ต้องแยกกันให้ชัด</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-20" class="chapter markdown-cell"><h2>20. การเลื่อนหน้าต่างและเฉลี่ย logits</h2>
+<p>ตอน inference หน้าต่างยาว 20 EEG epochs แต่เลื่อนครั้งละ 5 epochs</p>
+<p>EEG epoch หนึ่งจึงอาจได้รับคำทายจากหลายหน้าต่าง ซึ่งให้บริบทต่างกัน</p>
+<p>ให้ <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="script">W</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\mathcal W(t)</annotation></semantics></math></span> เป็นชุดหน้าต่างที่ครอบ epoch <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>t</mi></mrow><annotation encoding="application/x-tex">t</annotation></semantics></math></span>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi mathvariant="bold">a</mi><mo stretchy="true">‾</mo></mover><mi>t</mi></msub><mo>=</mo><mfrac><mn>1</mn><mrow><mi mathvariant="normal">∣</mi><mi mathvariant="script">W</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo><mi mathvariant="normal">∣</mi></mrow></mfrac><munder><mo>∑</mo><mrow><mi>w</mi><mo>∈</mo><mi mathvariant="script">W</mi><mo stretchy="false">(</mo><mi>t</mi><mo stretchy="false">)</mo></mrow></munder><msubsup><mi mathvariant="bold">a</mi><mi>t</mi><mrow><mo stretchy="false">(</mo><mi>w</mi><mo stretchy="false">)</mo></mrow></msubsup></mrow><annotation encoding="application/x-tex">\overline{\mathbf a}_t
+=
+\frac{1}{|\mathcal W(t)|}
+\sum_{w\in\mathcal W(t)}
+\mathbf a_t^{(w)}</annotation></semantics></math></span></div>
+<p>แล้วเลือก:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>y</mi><mo stretchy="true">^</mo></mover><mi>t</mi></msub><mo>=</mo><mi>arg</mi><mo>⁡</mo><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>c</mi></munder><msub><mover accent="true"><mi>a</mi><mo stretchy="true">‾</mo></mover><mrow><mi>t</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\widehat y_t
+=
+\arg\max_c\overline a_{t,c}</annotation></semantics></math></span></div>
+<p>โค้ดเราเฉลี่ย <strong>logits</strong> ไม่ใช่เฉลี่ยป้ายคลาส และไม่ใช่เฉลี่ย probabilities โดยตรง</p>
+<p>เพราะ softmax ไม่เป็นเชิงเส้น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mrow><mo fence="true">(</mo><mfrac><mrow><msup><mi>a</mi><mrow><mo stretchy="false">(</mo><mn>1</mn><mo stretchy="false">)</mo></mrow></msup><mo>+</mo><msup><mi>a</mi><mrow><mo stretchy="false">(</mo><mn>2</mn><mo stretchy="false">)</mo></mrow></msup></mrow><mn>2</mn></mfrac><mo fence="true">)</mo></mrow><mo mathvariant="normal">≠</mo><mfrac><mrow><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><msup><mi>a</mi><mrow><mo stretchy="false">(</mo><mn>1</mn><mo stretchy="false">)</mo></mrow></msup><mo stretchy="false">)</mo><mo>+</mo><mi mathvariant="normal">softmax</mi><mo>⁡</mo><mo stretchy="false">(</mo><msup><mi>a</mi><mrow><mo stretchy="false">(</mo><mn>2</mn><mo stretchy="false">)</mo></mrow></msup><mo stretchy="false">)</mo></mrow><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">\operatorname{softmax}
+\left(\frac{a^{(1)}+a^{(2)}}{2}\right)
+\neq
+\frac{
+\operatorname{softmax}(a^{(1)})
++
+\operatorname{softmax}(a^{(2)})
+}{2}</annotation></semantics></math></span></div>
+<p>โดยทั่วไป</p>
+<p>ในทางคณิตศาสตร์ softmax ของค่าเฉลี่ย logits สัมพันธ์กับ <strong>ค่าเฉลี่ยเรขาคณิตของ probabilities แล้ว normalize ใหม่</strong>:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi>p</mi><mo stretchy="true">‾</mo></mover><mi>c</mi></msub><mo>=</mo><mfrac><mrow><munder><mo>∏</mo><mi>w</mi></munder><msubsup><mi>p</mi><mrow><mi>w</mi><mo separator="true">,</mo><mi>c</mi></mrow><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mi>J</mi></mrow></msubsup></mrow><mrow><munder><mo>∑</mo><mi>k</mi></munder><munder><mo>∏</mo><mi>w</mi></munder><msubsup><mi>p</mi><mrow><mi>w</mi><mo separator="true">,</mo><mi>k</mi></mrow><mrow><mn>1</mn><mi mathvariant="normal">/</mi><mi>J</mi></mrow></msubsup></mrow></mfrac></mrow><annotation encoding="application/x-tex">\overline p_c
+=
+\frac{
+\prod_{w}p_{w,c}^{1/J}
+}{
+\sum_k\prod_{w}p_{w,k}^{1/J}
+}</annotation></semantics></math></span></div>
+<p>เมื่อมี <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>J</mi></mrow><annotation encoding="application/x-tex">J</annotation></semantics></math></span> หน้าต่าง</p>
+<p>กฎการรวมคำทายจึงเป็นส่วนหนึ่งของ protocol ไม่ใช่รายละเอียดที่เปลี่ยนได้โดยถือว่าผลเหมือนเดิมเสมอ</p>
+<p>Validation และ test ของเราใช้ inference path เดียวกัน อยู่ใน eval mode และหน้าต่างไม่ข้ามคืนหรือช่วงที่ข้อมูลถูกตัดออก</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-21" class="chapter markdown-cell"><h2>21. สูตรประเมินผลแต่ละตัววัดอะไร?</h2>
+<p>ให้ confusion matrix เป็น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>C</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">#</mi><mo stretchy="false">{</mo><mi>y</mi><mo>=</mo><mi>i</mi><mo separator="true">,</mo><mover accent="true"><mi>y</mi><mo stretchy="true">^</mo></mover><mo>=</mo><mi>j</mi><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">C_{i,j}
+=
+\#\{y=i,\widehat y=j\}</annotation></semantics></math></span></div>
+<p>คือจำนวนตัวอย่างที่คลาสจริงเป็น <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span> แต่ทายเป็น <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span></p>
+<ul>
+<li>แถว: คลาสจริง</li>
+<li>คอลัมน์: คลาสที่ทาย</li>
+<li>แนวทแยง: ทายถูก</li>
+</ul>
+<h3>Accuracy</h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Accuracy</mi><mo>⁡</mo><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>c</mi></munder><msub><mi>C</mi><mrow><mi>c</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>C</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">\operatorname{Accuracy}
+=
+\frac{\sum_cC_{c,c}}
+{\sum_i\sum_jC_{i,j}}</annotation></semantics></math></span></div>
+<p>นับทุก EEG epoch เท่ากัน</p>
+<h3>Recall ของคลาส <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span></h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mrow><mi mathvariant="normal">Recall</mi><mo>⁡</mo></mrow><mi>c</mi></msub><mo>=</mo><mfrac><msub><mi>C</mi><mrow><mi>c</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mrow><munder><mo>∑</mo><mi>j</mi></munder><msub><mi>C</mi><mrow><mi>c</mi><mo separator="true">,</mo><mi>j</mi></mrow></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">\operatorname{Recall}_c
+=
+\frac{C_{c,c}}{\sum_jC_{c,j}}</annotation></semantics></math></span></div>
+<p>ตอบว่า:</p>
+<blockquote>
+<p>ในคลาสนี้ที่เป็นจริงทั้งหมด จับได้กี่ส่วน?</p>
+</blockquote>
+<h3>Precision ของคลาส <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>c</mi></mrow><annotation encoding="application/x-tex">c</annotation></semantics></math></span></h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mrow><mi mathvariant="normal">Precision</mi><mo>⁡</mo></mrow><mi>c</mi></msub><mo>=</mo><mfrac><msub><mi>C</mi><mrow><mi>c</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>C</mi><mrow><mi>i</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">\operatorname{Precision}_c
+=
+\frac{C_{c,c}}{\sum_iC_{i,c}}</annotation></semantics></math></span></div>
+<p>ตอบว่า:</p>
+<blockquote>
+<p>ในตัวอย่างที่โมเดลทายว่าเป็นคลาสนี้ มีที่ถูกจริงกี่ส่วน?</p>
+</blockquote>
+<h3>F1</h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>F</mi><msub><mn>1</mn><mi>c</mi></msub><mo>=</mo><mfrac><mrow><mn>2</mn><msub><mi>P</mi><mi>c</mi></msub><msub><mi>R</mi><mi>c</mi></msub></mrow><mrow><msub><mi>P</mi><mi>c</mi></msub><mo>+</mo><msub><mi>R</mi><mi>c</mi></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">F1_c
+=
+\frac{2P_cR_c}{P_c+R_c}</annotation></semantics></math></span></div>
+<p>หรือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>F</mi><msub><mn>1</mn><mi>c</mi></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mi>T</mi><msub><mi>P</mi><mi>c</mi></msub></mrow><mrow><mn>2</mn><mi>T</mi><msub><mi>P</mi><mi>c</mi></msub><mo>+</mo><mi>F</mi><msub><mi>P</mi><mi>c</mi></msub><mo>+</mo><mi>F</mi><msub><mi>N</mi><mi>c</mi></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">F1_c
+=
+\frac{2TP_c}
+{2TP_c+FP_c+FN_c}</annotation></semantics></math></span></div>
+<p>F1 ใช้ harmonic mean ซึ่งลงโทษกรณีที่ precision กับ recall ต่างกันมาก</p>
+<h3>Macro-F1</h3>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">MacroF1</mi><mo>⁡</mo><mo>=</mo><mfrac><mn>1</mn><mn>5</mn></mfrac><munderover><mo>∑</mo><mrow><mi>c</mi><mo>=</mo><mn>0</mn></mrow><mn>4</mn></munderover><mi>F</mi><msub><mn>1</mn><mi>c</mi></msub></mrow><annotation encoding="application/x-tex">\operatorname{MacroF1}
+=
+\frac{1}{5}\sum_{c=0}^{4}F1_c</annotation></semantics></math></span></div>
+<p>ให้แต่ละคลาสมีน้ำหนักเท่ากัน ไม่ว่าคลาสนั้นมีจำนวน epochs มากหรือน้อย</p>
+<h3>Mean subject macro-F1 ที่เป็นคะแนนหลักของเรา</h3>
+<p>คำนวณรายคนก่อน แล้วเฉลี่ย:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">MeanSubjectMF1</mi><mo>⁡</mo><mo>=</mo><mfrac><mn>1</mn><mi>S</mi></mfrac><munderover><mo>∑</mo><mrow><mi>s</mi><mo>=</mo><mn>1</mn></mrow><mi>S</mi></munderover><mrow><mo fence="true">[</mo><mfrac><mn>1</mn><mn>5</mn></mfrac><munderover><mo>∑</mo><mrow><mi>c</mi><mo>=</mo><mn>0</mn></mrow><mn>4</mn></munderover><mi>F</mi><msub><mn>1</mn><mrow><mi>s</mi><mo separator="true">,</mo><mi>c</mi></mrow></msub><mo fence="true">]</mo></mrow></mrow><annotation encoding="application/x-tex">\operatorname{MeanSubjectMF1}
+=
+\frac{1}{S}
+\sum_{s=1}^{S}
+\left[
+\frac{1}{5}\sum_{c=0}^{4}F1_{s,c}
+\right]</annotation></semantics></math></span></div>
+<p>โดย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mn>20</mn></mrow><annotation encoding="application/x-tex">S=20</annotation></semantics></math></span></p>
+<p>จึงให้แต่ละคนมีน้ำหนักเท่ากัน แม้แต่ละคนมีจำนวน epochs ไม่เท่ากัน</p>
+<p>มันไม่จำเป็นต้องเท่ากับ macro-F1 จาก confusion matrix ที่รวมทุกคน เพราะ F1 เป็นฟังก์ชันไม่เชิงเส้น</p>
+<h3>ตัวอย่างจริง: N1 ของ R1</h3>
+<p>จาก confusion matrix ที่บันทึกไว้:</p>
+<ul>
+<li>N1 จริงทั้งหมด: 2,804</li>
+<li>ทาย N1 ถูก: 1,253</li>
+<li>ทายว่าเป็น N1 ทั้งหมด: 3,220</li>
+</ul>
+<p>จึงได้:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>R</mi><mrow><mi>N</mi><mn>1</mn></mrow></msub><mo>=</mo><mfrac><mn>1253</mn><mn>2804</mn></mfrac><mo>≈</mo><mn>0.4469</mn></mrow><annotation encoding="application/x-tex">R_{N1}
+=
+\frac{1253}{2804}
+\approx0.4469</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>P</mi><mrow><mi>N</mi><mn>1</mn></mrow></msub><mo>=</mo><mfrac><mn>1253</mn><mn>3220</mn></mfrac><mo>≈</mo><mn>0.3891</mn></mrow><annotation encoding="application/x-tex">P_{N1}
+=
+\frac{1253}{3220}
+\approx0.3891</annotation></semantics></math></span></div>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>F</mi><msub><mn>1</mn><mrow><mi>N</mi><mn>1</mn></mrow></msub><mo>=</mo><mfrac><mrow><mn>2</mn><mo stretchy="false">(</mo><mn>1253</mn><mo stretchy="false">)</mo></mrow><mrow><mn>2804</mn><mo>+</mo><mn>3220</mn></mrow></mfrac><mo>≈</mo><mn>0.4160</mn></mrow><annotation encoding="application/x-tex">F1_{N1}
+=
+\frac{2(1253)}{2804+3220}
+\approx0.4160</annotation></semantics></math></span></div>
+<p>นี่เป็น <strong>pooled test N1 F1</strong> ไม่ใช่ validation N1 F1 หรือ mean subject macro-F1</p>
+<p>มันแสดงว่า แม้ accuracy รวมประมาณ 81% โมเดลยังมีปัญหาทั้งการจับ N1 ไม่ครบและการทาย N1 เกิน</p>
+<p>และ <strong>Cross-Entropy ที่ใช้ฝึกไม่ได้เป็นสูตรเดียวกับ Macro-F1 ที่ใช้ประเมิน</strong> การลด loss จึงไม่รับประกันว่าทุก metric จะดีขึ้นพร้อมกัน</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-22" class="chapter markdown-cell"><h2>22. Bootstrap และช่วงความเชื่อมั่น</h2>
+<p>เรามีผลจากผู้เข้าร่วม 20 คน แต่ถ้าได้คนอีกกลุ่มหนึ่ง คะแนนอาจต่างออกไป</p>
+<p>Bootstrap ใช้ประมาณความแปรปรวนจากกลุ่มที่มีอยู่ โดยสุ่มคนกลับคืน:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msubsup><mi>s</mi><mn>1</mn><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><msubsup><mi>s</mi><mn>20</mn><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>∼</mo><mi mathvariant="normal">SampleWithReplacement</mi><mo>⁡</mo><mo stretchy="false">(</mo><mo stretchy="false">{</mo><mn>1</mn><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><mn>20</mn><mo stretchy="false">}</mo><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">s_1^{(b)},\ldots,s_{20}^{(b)}
+\sim
+\operatorname{SampleWithReplacement}
+(\{1,\ldots,20\})</annotation></semantics></math></span></div>
+<p>ทำ 1,000 ครั้ง โดยใช้ seed คงที่</p>
+<p>“กลับคืน” หมายความว่า คนหนึ่งอาจถูกสุ่มซ้ำ และบางคนไม่ปรากฏในรอบนั้น</p>
+<p>สำหรับ MF1:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>M</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msup><mo>=</mo><mfrac><mn>1</mn><mn>20</mn></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mn>20</mn></munderover><msub><mi>M</mi><msubsup><mi>s</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup></msub></mrow><annotation encoding="application/x-tex">M^{(b)}
+=
+\frac{1}{20}
+\sum_{i=1}^{20}M_{s_i^{(b)}}</annotation></semantics></math></span></div>
+<p>สำหรับ pooled accuracy ต้องรวมจำนวนถูกและจำนวนทั้งหมด:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>A</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msup><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mrow><mi mathvariant="normal">correct</mi><mo>⁡</mo></mrow><msubsup><mi>s</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mrow><mi mathvariant="normal">total</mi><mo>⁡</mo></mrow><msubsup><mi>s</mi><mi>i</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup></msub></mrow></mfrac></mrow><annotation encoding="application/x-tex">A^{(b)}
+=
+\frac{
+\sum_i\operatorname{correct}_{s_i^{(b)}}
+}{
+\sum_i\operatorname{total}_{s_i^{(b)}}
+}</annotation></semantics></math></span></div>
+<p>ไม่ใช่เฉลี่ย accuracy ของแต่ละคนเฉย ๆ</p>
+<h3>ทำไมต้อง paired?</h3>
+<p>ถ้าเปรียบเทียบ R1 กับฐาน เราใช้รายชื่อคนที่สุ่มเหมือนกันทั้งสอง run:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi mathvariant="normal">Δ</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msup><mo>=</mo><msubsup><mi>M</mi><mrow><mi>R</mi><mn>1</mn></mrow><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup><mo>−</mo><msubsup><mi>M</mi><mrow><mi mathvariant="normal">b</mi><mi mathvariant="normal">a</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">e</mi></mrow><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msubsup></mrow><annotation encoding="application/x-tex">\Delta^{(b)}
+=
+M_{R1}^{(b)}-M_{\mathrm{base}}^{(b)}</annotation></semantics></math></span></div>
+<p>จึงไม่เอาความต่างจากการสุ่มคนคนละชุดมาปนเพิ่ม</p>
+<p>ช่วง percentile 95% คือ:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><msub><mi>Q</mi><mn>0.025</mn></msub><mo stretchy="false">(</mo><msup><mi mathvariant="normal">Δ</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msup><mo stretchy="false">)</mo><mo separator="true">,</mo><msub><mi>Q</mi><mn>0.975</mn></msub><mo stretchy="false">(</mo><msup><mi mathvariant="normal">Δ</mi><mrow><mo stretchy="false">(</mo><mi>b</mi><mo stretchy="false">)</mo></mrow></msup><mo stretchy="false">)</mo><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[
+Q_{0.025}(\Delta^{(b)}),
+Q_{0.975}(\Delta^{(b)})
+]</annotation></semantics></math></span></div>
+<p>โดย <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>Q</mi></mrow><annotation encoding="application/x-tex">Q</annotation></semantics></math></span> เป็น quantile ของผล bootstrap</p>
+<p>แต่ช่วงนี้เป็นความไม่แน่นอนแบบมีเงื่อนไขต่อข้อมูลและผลที่มีอยู่ มันไม่ได้รวมความไม่แน่นอนทุกอย่าง เช่น:</p>
+<ul>
+<li>การฝึกด้วย seed อื่น</li>
+<li>การลองหลายวิธีแล้วเลือกวิธีหนึ่ง</li>
+<li>การทดสอบกับประชากรใหม่</li>
+<li>ความสัมพันธ์จาก training sets ที่ทับซ้อนข้าม folds</li>
+</ul>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-23" class="chapter markdown-cell"><h2>23. เชื่อมทั้งหมดกลับมาที่การทดลองของเรา</h2>
+<p>สาม run ใช้แนวทางสร้างสถิติแตกต่างกัน:</p>
+<ol>
+<li><strong>ฐาน:</strong> สถิติจาก train subjects</li>
+<li><strong>R1:</strong> สถิติจาก retained epochs ของคืนตัวเอง</li>
+<li><strong>Full-night sensitivity:</strong> สถิติจาก complete PSG epochs ทั้งคืน โดยไม่ใช้ hypnogram เลือกช่วงสำหรับสถิติ</li>
+</ol>
+<p>สำหรับ R1 แม้ฟังก์ชัน normalization ไม่รับ label แต่ retained epochs ผ่านการเลือกช่วงด้วย hypnogram มาแล้ว จึงต้องแยก “สูตรไม่ได้อ่าน label” ออกจาก “ช่วงข้อมูลที่นำมาคำนวณไม่เกี่ยวข้องกับ label เลย”</p>
+<p>Full-night sensitivity เปลี่ยนเฉพาะช่วงที่สร้างสถิติ ส่วนตัวอย่างที่ใช้ฝึกและนับคะแนนยังเป็นชุดเดิม</p>
+<p>ผลที่บันทึกไว้:</p>
+<div class="table-scroll" tabindex="0" aria-label="ตาราง เลื่อนแนวนอนได้"><table>
+<thead>
+<tr>
+<th>Run</th>
+<th style="text-align:right">Mean subject MF1</th>
+<th style="text-align:right">Pooled accuracy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ฐาน</td>
+<td style="text-align:right">0.5642</td>
+<td style="text-align:right">0.6500</td>
+</tr>
+<tr>
+<td>R1</td>
+<td style="text-align:right">0.7486</td>
+<td style="text-align:right">0.8099</td>
+</tr>
+<tr>
+<td>Full-night</td>
+<td style="text-align:right">0.7184</td>
+<td style="text-align:right">0.7910</td>
+</tr>
+</tbody>
+</table></div>
+<p>ผลละเอียดอยู่ใน <a href="foundations-results-20261014.json">ข้อมูลผลที่ล็อกไว้</a></p>
+<p>สิ่งที่พูดได้คือ <strong>R1 package ได้คะแนนสูงกว่าฐานใน cohort นี้</strong></p>
+<p>สิ่งที่ยังแยกไม่ได้คือ คะแนนที่เพิ่มมาจากการปรับ normalization เท่าไร และจากผลของน้ำหนักที่ฝึกใหม่เท่าไร เพราะไม่ได้ตรึงน้ำหนักเดิมไว้เพื่อแยกผลสองส่วนใน comparison นี้</p>
+<p>นอกจากนี้ R1 ถูกเลือกหลังเห็นความล้มเหลวของ test ฐาน จึงเป็น post-hoc ไม่ใช่การยืนยันอิสระ</p>
+<p>สำหรับ Full-night − R1:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi mathvariant="normal">Δ</mi><mo>=</mo><mo>−</mo><mn>0.030217</mn></mrow><annotation encoding="application/x-tex">\Delta=-0.030217</annotation></semantics></math></span></div>
+<p>ช่วงความเชื่อมั่น:</p>
+<div class="equation" tabindex="0" aria-label="สูตรคณิตศาสตร์ เลื่อนแนวนอนได้"><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo stretchy="false">[</mo><mo>−</mo><mn>0.071242</mn><mo separator="true">,</mo><mtext> </mtext><mn>0.012159</mn><mo stretchy="false">]</mo></mrow><annotation encoding="application/x-tex">[-0.071242,\ 0.012159]</annotation></semantics></math></span></div>
+<p>ช่วงนี้คร่อมศูนย์ จึงมี <strong>หลักฐานไม่เพียงพอที่จะสรุปว่าต่างกัน</strong> แต่ไม่ได้พิสูจน์ว่าเท่ากัน</p>
+<p>เกณฑ์ sensitivity ที่ล็อกไว้เป็นขอบเขตการตีความเชิงพรรณนาอีกเรื่องหนึ่ง ไม่ใช่การทดสอบนัยสำคัญทางสถิติ และเกณฑ์นั้นกำหนดหลังเห็นฐานกับ R1 แล้ว แม้จะ commit ก่อนรัน sensitivity ก็ตาม</p>
+<hr>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<section id="lesson-24" class="chapter markdown-cell"><h2>24. ข้อสรุปทางหลักการที่ควรจำ</h2>
+<p>งานนี้มีการคำนวณหลายระดับ ซึ่งต้องไม่ปนกัน:</p>
+<ul>
+<li><strong>Sampling</strong> เปลี่ยนสัญญาณต่อเนื่องเป็นลำดับตัวเลข</li>
+<li><strong>STFT</strong> เปลี่ยนลำดับเวลาเป็นข้อมูลเวลา–ความถี่</li>
+<li><strong>Log-magnitude</strong> บีบช่วงค่าและทิ้งข้อมูลเฟสบางส่วน</li>
+<li><strong>Normalization</strong> เปลี่ยนศูนย์กลางและสเกลตามแหล่งสถิติที่เลือก</li>
+<li><strong>CNN</strong> เรียนรู้รูปแบบภายใน EEG epoch</li>
+<li><strong>BiGRU</strong> เรียนรู้บริบทภายในหน้าต่างลำดับ</li>
+<li><strong>Classifier</strong> สร้าง logits ต่อ EEG epoch</li>
+<li><strong>Loss และ backpropagation</strong> สร้าง gradient</li>
+<li><strong>AdamW</strong> ใช้ gradient ปรับพารามิเตอร์</li>
+<li><strong>Inference aggregation</strong> รวมคำทายจากหน้าต่างซ้อนกัน</li>
+<li><strong>Metrics และ bootstrap</strong> ประเมินความถูกต้องและความไม่แน่นอนภายใต้ protocol</li>
+</ul>
+<p>ทั้งหมดนี้เป็นระบบเดียวกัน การเปลี่ยนส่วนใดส่วนหนึ่งอาจเปลี่ยนความหมายของผลที่วัดได้</p>
+<p>ดังนั้นความเข้าใจเชิงลึกของโครงการเราไม่ใช่เพียงจำว่า “CNN+BiGRU ได้ accuracy เท่าไร” แต่คือการรู้ว่า <strong>ตัวเลขเกิดจากข้อมูลแบบไหน การแปลงแบบไหน การเข้าถึงข้อมูลระดับไหน และวิธีเฉลี่ยคะแนนแบบไหน</strong> ครับ</p>
+<a class="return-link" href="#contents">กลับสารบัญ</a></section>
+<footer class="book-footer"><h2>ที่มาและความครบถ้วน</h2><p>ข้อความหลักถอดจากคำตอบผู้ช่วยในแชทโดยตรง การเก็บนี้ยืนยันแหล่งที่มา ไม่ใช่การรับรองผลวิจัยอย่างอิสระ บันทึกแยกส่วนอยู่ใน Research Inbox พร้อม source reference และ exact excerpt</p><p><a href="foundations-source-20261014.json" target="_blank" rel="noopener">เปิดข้อความต้นฉบับและข้อมูลตรวจสอบ (JSON)</a></p><p>SHA-256 ของข้อความ UTF-8: <code>bdbdfcdb054691082b7a296d980e3c8ca129851c98eecb1d83268d7bae38c9e9</code></p><p><a href="index.html">กลับคลัง Sleep Stage</a> · <a href="#top">กลับต้นบทเรียน</a></p></footer></main></body></html>
